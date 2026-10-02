@@ -9,6 +9,7 @@
  */
 import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import {
+  type DevicePlatform,
   EnvironmentId,
   ThreadId,
   type ChatFileAttachment,
@@ -35,7 +36,7 @@ export type RightPanelKind = (typeof RIGHT_PANEL_KINDS)[number];
 export interface DeviceTabTarget {
   hostId: string;
   deviceId: string;
-  platform: "ios" | "android";
+  platform: DevicePlatform;
   name: string;
 }
 

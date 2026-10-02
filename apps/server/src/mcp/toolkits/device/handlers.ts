@@ -20,9 +20,15 @@ import { DeviceScreenshotToolkit, DeviceStandardToolkit, DeviceToolkit } from ".
 
 /** The flags that pin every agent-device command to one device. */
 export function agentDeviceTargetArgs(device: DeviceSummary): ReadonlyArray<string> {
-  return device.platform === "ios"
-    ? ["--platform", "ios", "--udid", device.id]
-    : ["--platform", "android", "--serial", device.id];
+  switch (device.platform) {
+    case "ios":
+      return ["--platform", "ios", "--udid", device.id];
+    case "android":
+      return ["--platform", "android", "--serial", device.id];
+    case "desktop":
+      // agent-device does not drive X displays; the agent uses xdotool directly.
+      return [];
+  }
 }
 
 /**
@@ -44,6 +50,13 @@ export function agentDeviceQuickStart(
       /^[a-zA-Z0-9_./:-]+$/.test(arg) ? arg : "'" + arg.replaceAll("'", "'\"'\"'") + "'",
     )
     .join(" ");
+  if (device.platform === "desktop") {
+    return [
+      `The user is watching the desktop on display ${device.id} (${device.version}) in the Device panel.`,
+      `Drive it with xdotool against DISPLAY=${device.id}, for example: DISPLAY=${device.id} xdotool mousemove 100 100 click 1`,
+      "Call device_screenshot to see the current screen. Launch GUI apps with that DISPLAY set.",
+    ].join("\n");
+  }
   const platformNotes =
     device.platform === "ios"
       ? "First use builds an XCTest runner and can take a couple of minutes; later commands are fast."

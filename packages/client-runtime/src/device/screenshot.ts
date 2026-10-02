@@ -13,7 +13,12 @@ export class DeviceScreenshotError extends Error {
 
 /** Captures native pixels through the same host and credentials as the live stream, in either presentation. */
 export async function captureDeviceScreenshot(target: DeviceStreamTarget, signal: AbortSignal) {
-  const vendor = target.platform === "ios" ? "serve-sim" : "serve-emu";
+  const vendor =
+    target.platform === "ios"
+      ? "serve-sim"
+      : target.platform === "desktop"
+        ? "serve-desktop"
+        : "serve-emu";
   const url = withDeviceHubQuery(
     `${target.access.httpBase}/vendor/${vendor}/api/screenshot?device=${encodeURIComponent(target.deviceId)}`,
     target.access,

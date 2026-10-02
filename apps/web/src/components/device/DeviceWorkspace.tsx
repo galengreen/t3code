@@ -94,7 +94,7 @@ export function DeviceWorkspace(props: {
             hostId={props.device.hostId}
             visible={props.visible}
             axOverlay={axOverlay}
-            allowPhoneView
+            allowPhoneView={props.device.platform !== "desktop"}
             onHandle={setHandle}
             renderControls={(view) => (
               <DeviceControlsRail

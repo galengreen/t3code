@@ -79,6 +79,16 @@ To keep agents away from simulators, turn off **Agent device access** in
 **Settings → Integrations → Devices**. This hides the device tools from agents
 started from then on; your own Device panel is unaffected.
 
+## Desktops
+
+On a Linux environment server with `ffmpeg` and `xdotool` installed, the Device
+panel also lists each running X display under **Desktops**, including a virtual
+display such as Xvfb inside a container. Open one to watch and use that desktop
+with your own pointer: hover, click, right-click, drag, scroll, and type. Desktops have no
+hardware buttons, tools drawer, or 3D view, and T3 Code never starts or stops the
+display itself. Agents drive a desktop with `xdotool` against that `DISPLAY` and
+can call `device_screenshot` to see it.
+
 ## Remote connections
 
 The device stream goes through the environment server, so it works over the

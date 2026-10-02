@@ -17,6 +17,7 @@ import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import { HttpClient, HttpClientResponse } from "effect/unstable/http";
 import * as ServerSettings from "../serverSettings.ts";
+import * as DesktopStreamer from "./DesktopStreamer.ts";
 import * as DeviceHost from "./DeviceHost.ts";
 import { NodeRuntimeUnavailableError } from "@t3tools/shared/nodeRuntime";
 
@@ -734,4 +735,72 @@ it.effect("failed manual installation leaves lifecycle state unchanged and can b
     expect(starts).toEqual([]);
     expect(agentStarts).toEqual([]);
   }).pipe(Effect.scoped),
+);
+
+it.effect("opens a desktop on a host without a device hub, making no hub requests", () =>
+  Effect.gen(function* () {
+    const deviceId = DeviceId.make(":1");
+    const threadId = ThreadId.make("desktop-only");
+    const ready: DeviceHost.DeviceHostReady = {
+      nodePath: process.execPath,
+      hub: null,
+      helpers: { serveSimAxSettings: null, serveSimCli: null },
+      run: () => Effect.succeed({ code: 0, stdout: "", stderr: "" }),
+    };
+    const host: DeviceHost.DeviceHost["Service"] = {
+      id: LOCAL_DEVICE_HOST_ID,
+      summary: Effect.succeed({
+        id: LOCAL_DEVICE_HOST_ID,
+        kind: "local",
+        label: "Sandbox",
+        platforms: [
+          { platform: "ios", available: false, reason: "No Xcode" },
+          { platform: "android", available: false, reason: "No SDK" },
+          { platform: "desktop", available: true },
+        ],
+        hubInstalled: false,
+        agentDeviceInstalled: false,
+      }),
+      platformAvailability: (platform) =>
+        Effect.succeed({ platform, available: platform === "desktop" }),
+      ensureReady: () => Effect.succeed(ready),
+      ensureAgentReady: () => Effect.die("Agent access is not used in this test"),
+      current: Effect.succeed(ready),
+      stopAgent: Effect.void,
+      stop: Effect.void,
+    };
+    const requests: string[] = [];
+    const http = HttpClient.make((request) =>
+      Effect.sync(() => {
+        requests.push(request.url);
+        return HttpClientResponse.fromWeb(request, new Response("unexpected", { status: 500 }));
+      }),
+    );
+    const streamer = DesktopStreamer.DesktopStreamer.of({
+      unavailableReason: Effect.succeed(null),
+      listDisplays: Effect.succeed([
+        {
+          hostId: LOCAL_DEVICE_HOST_ID,
+          id: deviceId,
+          platform: "desktop",
+          name: "Display :1",
+          version: "1600×1000",
+          booted: true,
+          physical: false,
+        },
+      ]),
+      stream: () => Effect.die("Streaming is not used in this test"),
+      screenshot: () => Effect.succeed(Uint8Array.from([137, 80, 78, 71])),
+    });
+    const service = yield* DeviceService.makeWithHosts(new Map([[host.id, host]])).pipe(
+      Effect.provideService(HttpClient.HttpClient, http),
+      Effect.provideService(DesktopStreamer.DesktopStreamer, streamer),
+    );
+    const session = yield* service.open({ threadId, deviceId, platform: "desktop" });
+    expect(session.deviceId).toBe(":1");
+    const capture = yield* service.screenshot({ deviceId });
+    expect(Array.from(capture.png)).toEqual([137, 80, 78, 71]);
+    expect((yield* service.state).devices.map((device) => device.id)).toEqual([":1"]);
+    expect(requests).toEqual([]);
+  }).pipe(Effect.provide(ServerSettings.layerTest({ enableDeviceSupport: true })), Effect.scoped),
 );

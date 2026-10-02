@@ -273,6 +273,18 @@ export interface DeviceStreamClient {
   /** Normalized 0..1 coordinates in the displayed frame. */
   readonly sendTouch: (phase: "begin" | "move" | "end", x: number, y: number) => void;
   readonly sendKey: (event: KeyboardEvent, phase: "down" | "up") => void;
+  /**
+   * Desktop only: a mouse with hover and buttons (1 left, 2 middle, 3 right),
+   * in normalized 0..1 coordinates. Other platforms ignore it.
+   */
+  readonly sendMouse: (
+    action: "down" | "move" | "up",
+    x: number,
+    y: number,
+    button: 1 | 2 | 3,
+  ) => void;
+  /** Desktop only: whole wheel steps; positive scrolls down or right. */
+  readonly sendWheel: (dx: number, dy: number) => void;
   readonly pressButton: (button: DeviceHardwareButton) => void;
   readonly rotate: () => void;
   readonly setOrientation: (orientation: DeviceScreenSize["orientation"]) => void;
@@ -351,7 +363,15 @@ export function createDeviceStreamClient(
 ): DeviceStreamClient {
   const { access, platform, deviceId } = target;
   const sink = "present" in output ? output : createCanvasFrameSink(output);
-  const vendor = platform === "ios" ? "/vendor/serve-sim" : "/vendor/serve-emu";
+  // Desktops speak serve-emu's format from the server itself, so everything
+  // below that is keyed on "android" applies to both SEMU sources.
+  const vendor =
+    platform === "ios"
+      ? "/vendor/serve-sim"
+      : platform === "desktop"
+        ? "/vendor/serve-desktop"
+        : "/vendor/serve-emu";
+  const semu = platform !== "ios";
   const device = encodeURIComponent(deviceId);
   const httpUrl = (path: string) =>
     withDeviceHubQuery(`${access.httpBase}${vendor}${path}`, access);
@@ -498,7 +518,7 @@ export function createDeviceStreamClient(
 
   const paint = (source: CanvasImageSource, width: number, height: number) => {
     if (stopped) return;
-    if (platform === "android" && (screen?.width !== width || screen.height !== height)) {
+    if (semu && (screen?.width !== width || screen.height !== height)) {
       screen = { width, height, orientation: width > height ? "landscape_left" : "portrait" };
       events.onScreen(screen);
     }
@@ -566,7 +586,7 @@ export function createDeviceStreamClient(
     const support = await VideoDecoder.isConfigSupported(full).catch(() => ({ supported: false }));
     if (!isCurrent() || epoch !== decoderEpoch) return false;
     if (!support.supported) {
-      if (platform === "android") fail(`This browser cannot decode ${config.codec}.`);
+      if (semu) fail(`This browser cannot decode ${config.codec}.`);
       return false;
     }
     try {
@@ -574,7 +594,7 @@ export function createDeviceStreamClient(
       videoDecoder.configure(full);
       return true;
     } catch (cause) {
-      if (platform === "android") fail(`Video decoder: ${(cause as Error).message}`);
+      if (semu) fail(`Video decoder: ${(cause as Error).message}`);
       return false;
     }
   };
@@ -604,7 +624,7 @@ export function createDeviceStreamClient(
   };
 
   const requestKeyframe = () => {
-    if (platform === "android" && socket?.readyState === WebSocket.OPEN) {
+    if (semu && socket?.readyState === WebSocket.OPEN) {
       socket.send(JSON.stringify({ type: "reset-video", ack: false }));
     }
   };
@@ -1039,6 +1059,14 @@ export function createDeviceStreamClient(
       }
       const action = phase === "begin" ? "down" : phase === "move" ? "move" : "up";
       send(JSON.stringify({ type: "touch", action, x, y }));
+    },
+    sendMouse: (action, x, y, button) => {
+      if (platform !== "desktop") return;
+      send(JSON.stringify({ type: "mouse", action, x, y, button }));
+    },
+    sendWheel: (dx, dy) => {
+      if (platform !== "desktop" || (dx === 0 && dy === 0)) return;
+      send(JSON.stringify({ type: "wheel", dx, dy }));
     },
     sendKey: (event, phase) => {
       if (platform === "ios") {

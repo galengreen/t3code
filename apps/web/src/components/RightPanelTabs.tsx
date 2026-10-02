@@ -1,4 +1,8 @@
-import { pullRequestHostOf, type SourceControlProviderKind } from "@t3tools/contracts";
+import {
+  DEVICE_PLATFORM_NAMES,
+  pullRequestHostOf,
+  type SourceControlProviderKind,
+} from "@t3tools/contracts";
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
 import { useProjects, useServerConfigs, useThreadShells } from "~/state/entities";
 import {
@@ -14,6 +18,7 @@ import type {
 } from "@t3tools/contracts";
 import { getTerminalLabel } from "@t3tools/shared/terminalLabels";
 import {
+  Monitor,
   Smartphone,
   ChevronDown,
   ChevronLeft,
@@ -684,6 +689,8 @@ function SurfaceIcon({
         <AppleIcon className="size-3 shrink-0" />
       ) : surface.target?.platform === "android" ? (
         <AndroidIcon className="size-3 shrink-0" />
+      ) : surface.target?.platform === "desktop" ? (
+        <Monitor className="size-3 shrink-0" />
       ) : (
         <Smartphone className="size-3 shrink-0" />
       );
@@ -1404,7 +1411,7 @@ function DeviceTabTooltip(props: {
       {target ? (
         <span className="text-muted-foreground">
           {host?.label ?? "Device host"} ·{" "}
-          {device?.version ?? (target.platform === "ios" ? "iOS" : "Android")}
+          {device?.version ?? DEVICE_PLATFORM_NAMES[target.platform]}
         </span>
       ) : null}
     </div>

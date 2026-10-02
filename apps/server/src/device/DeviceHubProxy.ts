@@ -10,6 +10,9 @@
  *
  * Only the routes the Device panel needs are forwarded. Anything under the
  * hub's dashboard, exec, or WebRTC surface is rejected here.
+ *
+ * `/vendor/serve-desktop/*` is not a hub route: desktop displays are served
+ * in-process by `DesktopStreamer`, behind the same authentication.
  */
 import {
   AuthOrchestrationReadScope,
@@ -34,6 +37,7 @@ import {
   failEnvironmentInternal,
   failEnvironmentScopeRequired,
 } from "../auth/http.ts";
+import * as DesktopStreamer from "./DesktopStreamer.ts";
 import * as DeviceService from "./DeviceService.ts";
 
 const ALLOWED_PATHS: ReadonlyArray<RegExp> = [
@@ -46,6 +50,7 @@ const ALLOWED_PATHS: ReadonlyArray<RegExp> = [
   /^\/vendor\/serve-sim\/appstate$/,
   /^\/vendor\/serve-emu\/api\/(devices|screenshot|stream-mode|stream-settings|accessibility|fold)$/,
   /^\/vendor\/serve-emu\/health$/,
+  /^\/vendor\/serve-desktop\/api\/screenshot$/,
 ];
 
 /** Read paths are GET-only; only these accept other methods (screenshot captures, stream tuning). */
@@ -53,13 +58,17 @@ const MUTABLE_PATHS: ReadonlyArray<RegExp> = [
   /^\/vendor\/serve-sim\/api\/screenshot$/,
   /^\/vendor\/serve-emu\/api\/(screenshot|stream-mode|stream-settings)$/,
   /^\/vendor\/serve-emu\/api\/fold$/,
+  /^\/vendor\/serve-desktop\/api\/screenshot$/,
 ];
 
 const ALLOWED_WS_PATHS: ReadonlyArray<RegExp> = [
   /^\/api\/devices\/ws$/,
   /^\/vendor\/serve-sim\/helper\/ws$/,
   /^\/vendor\/serve-emu\/ws$/,
+  /^\/vendor\/serve-desktop\/ws$/,
 ];
+
+const DESKTOP_VENDOR_PREFIX = "/vendor/serve-desktop";
 
 /** Hop-by-hop and origin headers that must not cross the proxy. */
 const DROPPED_REQUEST_HEADERS = new Set([
@@ -207,11 +216,15 @@ const handler = Effect.gen(function* () {
     (upgrade && hubPath !== "/api/devices/ws") ||
     (!readOnly && /\/api\/(stream-(mode|settings)|fold)$/.test(hubPath));
   yield* authenticate(controlsDevice ? AuthOrchestrationOperateScope : AuthOrchestrationReadScope);
+  if (hubPath.startsWith(`${DESKTOP_VENDOR_PREFIX}/`)) {
+    return yield* serveDesktop(request, hubPath.slice(DESKTOP_VENDOR_PREFIX.length), url.value);
+  }
   const devices = yield* DeviceService.DeviceService;
   const ready = yield* devices.currentReadiness(url.value.searchParams.get("hostId") ?? undefined);
-  if (!ready) {
+  if (!ready?.hub) {
     return HttpServerResponse.text("Device hub is not running", { status: 503 });
   }
+  const hub = ready.hub;
   // The hub runs in standalone mode at its origin root; the panel builds every
   // stream and socket URL itself, so nothing depends on the hub knowing the
   // T3 prefix.
@@ -222,12 +235,33 @@ const handler = Effect.gen(function* () {
   const search = upstreamSearch.size > 0 ? `?${upstreamSearch.toString()}` : "";
   const upstreamPath = `${hubPath}${search}`;
   if (upgrade) {
-    return yield* proxyWebSocket(
-      request,
-      `${ready.hub.origin.replace(/^http/, "ws")}${upstreamPath}`,
-    );
+    return yield* proxyWebSocket(request, `${hub.origin.replace(/^http/, "ws")}${upstreamPath}`);
   }
-  return yield* proxyHttp(request, `${ready.hub.origin}${upstreamPath}`, ready.hub.origin);
+  return yield* proxyHttp(request, `${hub.origin}${upstreamPath}`, hub.origin);
+});
+
+/** Desktop routes mirror serve-emu's shapes so the clients need no new paths. */
+const serveDesktop = Effect.fn("DeviceHubProxy.serveDesktop")(function* (
+  request: HttpServerRequest.HttpServerRequest,
+  path: string,
+  url: URL,
+) {
+  const streamer = yield* Effect.serviceOption(DesktopStreamer.DesktopStreamer);
+  if (Option.isNone(streamer)) {
+    return HttpServerResponse.text("Desktop streaming is unavailable", { status: 503 });
+  }
+  const display = url.searchParams.get("device") ?? "";
+  if (isWebSocketUpgrade(request) && path === "/ws") {
+    return yield* streamer.value.stream(request, display);
+  }
+  if (path === "/api/screenshot") {
+    const png = yield* streamer.value.screenshot(display);
+    return HttpServerResponse.uint8Array(png, {
+      contentType: "image/png",
+      headers: { "cache-control": "no-store" },
+    });
+  }
+  return HttpServerResponse.text("Not Found", { status: 404 });
 });
 
 export const deviceHubProxyRouteLayer = HttpRouter.add(

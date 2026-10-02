@@ -462,7 +462,13 @@ export const make = Effect.fn("SshDeviceHost.make")(function* (
       provide(probe(config, owner)).pipe(
         Effect.map((value) => {
           summary = { ...summary, platforms: value.platforms };
-          return value.platforms.find((p) => p.platform === platform)!;
+          return (
+            value.platforms.find((p) => p.platform === platform) ?? {
+              platform,
+              available: false,
+              reason: "This device host does not report that platform.",
+            }
+          );
         }),
         Effect.orElseSucceed(() => ({
           platform,

@@ -2,14 +2,18 @@ import { DeviceToolVersions } from "../device/DeviceToolVersions";
 import { Tooltip, TooltipTrigger, TooltipPopup } from "../ui/tooltip";
 import { AppleIcon, AndroidIcon } from "../Icons";
 import { Spinner } from "../ui/spinner";
-import type { EnvironmentId, SshDeviceHostConfig } from "@t3tools/contracts";
+import {
+  DEVICE_PLATFORM_NAMES,
+  type EnvironmentId,
+  type SshDeviceHostConfig,
+} from "@t3tools/contracts";
 import { randomUUID } from "../../lib/utils";
 import { useState } from "react";
 import { deviceEnvironment, useDeviceState } from "../../state/device";
 import { serverEnvironment } from "../../state/server";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { Button } from "../ui/button";
-import { MoreVertical, PlusIcon } from "lucide-react";
+import { Monitor, MoreVertical, PlusIcon } from "lucide-react";
 import { Menu, MenuTrigger, MenuPopup, MenuItem } from "../ui/menu";
 import { SettingsRow } from "./settingsLayout";
 
@@ -222,21 +226,21 @@ function DeviceHostList({
                           <span
                             tabIndex={0}
                             role="img"
-                            aria-label={
-                              platform.platform === "ios" ? "iOS available" : "Android available"
-                            }
+                            aria-label={`${DEVICE_PLATFORM_NAMES[platform.platform]} available`}
                             className="shrink-0 text-muted-foreground"
                           />
                         }
                       >
                         {platform.platform === "ios" ? (
                           <AppleIcon className="size-3.5" />
+                        ) : platform.platform === "desktop" ? (
+                          <Monitor className="size-3.5" />
                         ) : (
                           <AndroidIcon className="size-3.5" />
                         )}
                       </TooltipTrigger>
                       <TooltipPopup>
-                        {platform.platform === "ios" ? "iOS available" : "Android available"}
+                        {`${DEVICE_PLATFORM_NAMES[platform.platform]} available`}
                       </TooltipPopup>
                     </Tooltip>
                   ))}

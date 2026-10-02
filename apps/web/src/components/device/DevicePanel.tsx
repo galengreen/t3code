@@ -1,9 +1,10 @@
 import { DeviceHostUpdates } from "./DeviceHostUpdates";
-import type {
-  DevicePlatform,
-  DeviceServiceState,
-  DeviceSummary,
-  ScopedThreadRef,
+import {
+  DEVICE_PLATFORMS,
+  type DevicePlatform,
+  type DeviceServiceState,
+  type DeviceSummary,
+  type ScopedThreadRef,
 } from "@t3tools/contracts";
 import { Smartphone, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
@@ -25,7 +26,7 @@ import { DeviceWorkspace } from "./DeviceWorkspace";
 import { PreviewPanelShell, type PreviewPanelMode } from "../preview/PreviewPanelShell";
 
 const platformLabel = (platform: DevicePlatform) =>
-  platform === "ios" ? "iOS Simulators" : "Android Emulators";
+  platform === "ios" ? "iOS Simulators" : platform === "android" ? "Android Emulators" : "Desktops";
 
 const deviceKey = (device: Pick<DeviceSummary, "hostId" | "id">) =>
   `${device.hostId}\u0000${device.id}`;
@@ -315,7 +316,7 @@ export function DevicePanel(props: {
 
 function groupDevices(state: DeviceServiceState) {
   const groups: Array<{ platform: DevicePlatform; devices: DeviceSummary[] }> = [];
-  for (const platform of ["ios", "android"] as const) {
+  for (const platform of DEVICE_PLATFORMS) {
     const devices = state.devices
       .filter((device) => device.platform === platform)
       .toSorted((a, b) => Number(b.booted) - Number(a.booted) || a.name.localeCompare(b.name));
