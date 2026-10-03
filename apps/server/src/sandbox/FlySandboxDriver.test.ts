@@ -211,6 +211,43 @@ describe("FlySandboxDriver", () => {
     );
   });
 
+  it.effect("reads a token's organizations and Fly's regions as the API sends them", () =>
+    Effect.gen(function* () {
+      const account = yield* FlySandboxDriver.flyAccount("FlyV1 fm2_secret").pipe(
+        Effect.provideService(
+          HttpClient.HttpClient,
+          HttpClient.make((request) =>
+            Effect.succeed(
+              HttpClientResponse.fromWeb(
+                request,
+                Response.json(
+                  request.url.endsWith("/v1/tokens/current")
+                    ? { tokens: [{ org_slug: "t3-sandboxes", organization: "T3 Sandboxes" }] }
+                    : {
+                        Regions: [
+                          { code: "syd", name: "Sydney, Australia", deprecated: false },
+                          { code: "bom", name: "Mumbai, India", deprecated: true },
+                          { code: "ams", name: "Amsterdam, Netherlands", deprecated: false },
+                        ],
+                        nearest: "syd",
+                      },
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      expect(account).toEqual({
+        organizations: [{ slug: "t3-sandboxes", name: "T3 Sandboxes" }],
+        regions: [
+          { code: "ams", name: "Amsterdam, Netherlands" },
+          { code: "syd", name: "Sydney, Australia" },
+        ],
+        nearestRegion: "syd",
+      });
+    }),
+  );
+
   it("sends macaroons with their scheme and other tokens as bearer tokens", () => {
     expect(FlySandboxDriver.flyAuthorization("FlyV1 fm2_abc,fm2_def")).toBe(
       "FlyV1 fm2_abc,fm2_def",

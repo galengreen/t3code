@@ -104,6 +104,7 @@ export class SandboxOperationError extends Schema.TaggedError<SandboxOperationEr
   },
 ) {
   override get message(): string {
+    if (this.operation === "account") return "Could not look up the Fly account.";
     return this.id === undefined
       ? `Could not ${this.operation} sandboxes.`
       : `Could not ${this.operation} sandbox ${this.id}.`;

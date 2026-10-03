@@ -101,16 +101,17 @@ const decodeTokenInfo = Schema.decodeUnknownEffect(
     ),
   }),
 );
+const Region = Schema.Struct({
+  code: Schema.String,
+  name: Schema.String,
+  deprecated: Schema.optional(Schema.Boolean),
+});
+// The API sends `Regions`, though its OpenAPI document says `regions`.
 const decodeRegions = Schema.decodeUnknownEffect(
   Schema.Struct({
     nearest: Schema.optional(Schema.String),
-    regions: Schema.Array(
-      Schema.Struct({
-        code: Schema.String,
-        name: Schema.String,
-        deprecated: Schema.optional(Schema.Boolean),
-      }),
-    ),
+    Regions: Schema.optional(Schema.Array(Region)),
+    regions: Schema.optional(Schema.Array(Region)),
   }),
 );
 
@@ -230,7 +231,7 @@ export const flyAccount = Effect.fn("FlySandboxDriver.account")(function* (token
   }
   return {
     organizations: [...organizations].map(([slug, name]) => ({ slug, name })),
-    regions: regions.regions
+    regions: (regions.Regions ?? regions.regions ?? [])
       .filter((region) => !region.deprecated)
       .map(({ code, name }) => ({ code, name }))
       .toSorted((a, b) => a.name.localeCompare(b.name)),
