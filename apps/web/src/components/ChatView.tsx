@@ -2952,6 +2952,10 @@ export default function ChatView(props: ChatViewProps) {
   const sandboxAvailable = Boolean(
     draftId && !envLocked && settings.enableSandboxes && sandboxRepositoryUrl,
   );
+  const sandboxUnavailableReason =
+    draftId && !envLocked && settings.enableSandboxes && !sandboxRepositoryUrl
+      ? "This project has no git remote to clone."
+      : undefined;
   const sandboxSelected = sandboxAvailable && draftThread?.environmentSelection === "sandbox";
   const sandboxDraftLaunch = useSandboxDraftLaunch();
   /** The sandbox environment a launched send is waiting to resume in. */
@@ -11455,7 +11459,9 @@ export default function ChatView(props: ChatViewProps) {
                                 {...(canCheckoutPullRequestIntoThread
                                   ? { onCheckoutPullRequestRequest: openPullRequestDialog }
                                   : {})}
-                                {...(hasMultipleEnvironments || sandboxAvailable
+                                {...(hasMultipleEnvironments ||
+                                sandboxAvailable ||
+                                sandboxUnavailableReason
                                   ? { onEnvironmentChange }
                                   : {})}
                                 autoEnvironmentLabel={autoEnvironmentLabel}
@@ -11463,6 +11469,7 @@ export default function ChatView(props: ChatViewProps) {
                                 onSandboxEnvironment={
                                   sandboxAvailable ? onSandboxEnvironment : undefined
                                 }
+                                sandboxUnavailableReason={sandboxUnavailableReason}
                                 onAutoEnvironment={
                                   draftId &&
                                   !envLocked &&

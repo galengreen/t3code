@@ -87,6 +87,7 @@ interface BranchToolbarProps {
   onAutoEnvironment?: (() => void) | undefined;
   sandboxLabel?: string | undefined;
   onSandboxEnvironment?: (() => void) | undefined;
+  sandboxUnavailableReason?: string | undefined;
   envLocked: boolean;
   onCheckoutPullRequestRequest?: (reference: string) => void;
   onComposerFocusRequest?: () => void;
@@ -102,6 +103,7 @@ interface MobileRunContextSelectorProps {
   onAutoEnvironment?: (() => void) | undefined;
   sandboxLabel?: string | undefined;
   onSandboxEnvironment?: (() => void) | undefined;
+  sandboxUnavailableReason?: string | undefined;
   envLocked: boolean;
   envModeLocked: boolean;
   environmentId: EnvironmentId;
@@ -123,6 +125,7 @@ const MobileRunContextSelector = memo(function MobileRunContextSelector({
   onAutoEnvironment,
   sandboxLabel,
   onSandboxEnvironment,
+  sandboxUnavailableReason,
   envLocked,
   envModeLocked,
   environmentId,
@@ -276,14 +279,26 @@ const MobileRunContextSelector = memo(function MobileRunContextSelector({
                     </span>
                   </MenuRadioItem>
                 ))}
-                {onSandboxEnvironment && (
+                {onSandboxEnvironment ? (
                   <MenuRadioItem value="sandbox" disabled={envLocked} closeOnClick>
                     <span className="flex min-w-0 items-center gap-1.5">
                       <BoxIcon className="size-3" aria-hidden="true" />
                       <span className="min-w-0 truncate">{sandboxLabel ?? "New sandbox"}</span>
                     </span>
                   </MenuRadioItem>
-                )}
+                ) : sandboxUnavailableReason ? (
+                  <MenuRadioItem value="sandbox" disabled>
+                    <span className="flex min-w-0 flex-col">
+                      <span className="flex min-w-0 items-center gap-1.5">
+                        <BoxIcon className="size-3" aria-hidden="true" />
+                        <span className="min-w-0 truncate">New sandbox</span>
+                      </span>
+                      <span className="text-muted-foreground text-xs">
+                        {sandboxUnavailableReason}
+                      </span>
+                    </span>
+                  </MenuRadioItem>
+                ) : null}
               </MenuRadioGroup>
             </MenuGroup>
             <MenuSeparator />
@@ -539,6 +554,7 @@ export const BranchToolbar = memo(function BranchToolbar({
   onAutoEnvironment,
   sandboxLabel,
   onSandboxEnvironment,
+  sandboxUnavailableReason,
   envLocked,
   onCheckoutPullRequestRequest,
   onComposerFocusRequest,
@@ -626,7 +642,7 @@ export const BranchToolbar = memo(function BranchToolbar({
 
   const showEnvironmentPicker = Boolean(
     availableEnvironments &&
-    (availableEnvironments.length > 1 || onSandboxEnvironment) &&
+    (availableEnvironments.length > 1 || onSandboxEnvironment || sandboxUnavailableReason) &&
     onEnvironmentChange,
   );
   const activeEnvironmentOption =
@@ -694,6 +710,7 @@ export const BranchToolbar = memo(function BranchToolbar({
             onAutoEnvironment={onAutoEnvironment}
             sandboxLabel={sandboxLabel}
             onSandboxEnvironment={onSandboxEnvironment}
+            sandboxUnavailableReason={sandboxUnavailableReason}
             envLocked={envLocked}
             envModeLocked={envModeLocked}
             environmentId={environmentId}
@@ -725,6 +742,7 @@ export const BranchToolbar = memo(function BranchToolbar({
                 onAutoEnvironment={onAutoEnvironment}
                 sandboxLabel={sandboxLabel}
                 onSandboxEnvironment={onSandboxEnvironment}
+                sandboxUnavailableReason={sandboxUnavailableReason}
                 envLocked={envLocked}
                 environmentId={environmentId}
                 availableEnvironments={availableEnvironments}

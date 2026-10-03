@@ -29,6 +29,8 @@ interface BranchToolbarEnvironmentSelectorProps {
   sandboxLabel?: string | undefined;
   /** Offers "New sandbox" when the current environment can create one. */
   onSandboxEnvironment?: (() => void) | undefined;
+  /** Shows "New sandbox" disabled with this reason when the environment hosts sandboxes but this draft cannot use one. */
+  sandboxUnavailableReason?: string | undefined;
   envLocked: boolean;
   environmentId: EnvironmentId;
   availableEnvironments: readonly EnvironmentOption[];
@@ -41,6 +43,7 @@ export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvir
   onAutoEnvironment,
   sandboxLabel,
   onSandboxEnvironment,
+  sandboxUnavailableReason,
   envLocked,
   environmentId,
   availableEnvironments,
@@ -192,14 +195,24 @@ export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvir
               </span>
             </SelectItem>
           ))}
-          {onSandboxEnvironment && (
+          {onSandboxEnvironment ? (
             <SelectItem value="sandbox">
               <span className="inline-flex items-center gap-1.5">
                 <BoxIcon className="size-3" aria-hidden="true" />
                 {sandboxLabel ?? "New sandbox"}
               </span>
             </SelectItem>
-          )}
+          ) : sandboxUnavailableReason ? (
+            <SelectItem value="sandbox" disabled>
+              <span className="flex flex-col">
+                <span className="inline-flex items-center gap-1.5">
+                  <BoxIcon className="size-3" aria-hidden="true" />
+                  New sandbox
+                </span>
+                <span className="text-muted-foreground text-xs">{sandboxUnavailableReason}</span>
+              </span>
+            </SelectItem>
+          ) : null}
         </SelectGroup>
       </SelectPopup>
     </Select>
