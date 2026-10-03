@@ -298,6 +298,7 @@ import {
 import { cn, randomUUID } from "~/lib/utils";
 import { COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS } from "~/workspaceTitlebar";
 import { stackedThreadToast, toastManager } from "./ui/toast";
+import { sandboxLabelFromPrompt, useSandboxDraftLaunch } from "./chat/useSandboxDraftLaunch";
 import {
   decodeProjectScriptKeybindingRule,
   keybindingValueForCommand,
@@ -2945,6 +2946,16 @@ export default function ChatView(props: ChatViewProps) {
       ? null
       : clampFileAttachmentUploadBytes(advertisedFileAttachmentBytes);
   const envLocked = Boolean(activeThread && (activeMessageCount > 0 || activeRuntime !== null));
+  // A new thread can start in a fresh sandbox on this environment when it has
+  // sandboxes switched on and the project has a remote to clone.
+  const sandboxRepositoryUrl = activeProject?.repositoryIdentity?.locator.remoteUrl ?? null;
+  const sandboxAvailable = Boolean(
+    draftId && !envLocked && settings.enableSandboxes && sandboxRepositoryUrl,
+  );
+  const sandboxSelected = sandboxAvailable && draftThread?.environmentSelection === "sandbox";
+  const sandboxDraftLaunch = useSandboxDraftLaunch();
+  /** The sandbox environment a launched send is waiting to resume in. */
+  const pendingSandboxSendRef = useRef<EnvironmentId | null>(null);
 
   const loadBalancingSettings = useClientSettings();
   const automaticEnvironment = Boolean(
@@ -2954,6 +2965,7 @@ export default function ChatView(props: ChatViewProps) {
     canAutoBalanceEnvironments &&
     loadBalancingSettings.loadBalancingEnabled &&
     draftThread?.environmentSelection !== "manual" &&
+    draftThread?.environmentSelection !== "sandbox" &&
     (!composerHasAttachments || Boolean(draftThread?.loadBalancedEnvironmentId)) &&
     (!draftThread?.branch || draftThread.environmentSelection === "auto") &&
     !draftThread?.worktreePath,
@@ -4424,6 +4436,31 @@ export default function ChatView(props: ChatViewProps) {
       setLogicalProjectDraftThreadId,
     ],
   );
+
+  const onSandboxEnvironment = useCallback(() => {
+    if (envLocked || !draftId) return;
+    if (composerHasAttachments) {
+      toastManager.add({
+        type: "warning",
+        id: "sandbox-attachments",
+        title: "Keep attachments on this machine",
+        description:
+          "Remove attachments before starting in a sandbox, then attach them once it is running.",
+      });
+      return;
+    }
+    setDraftThreadContext(draftId, {
+      environmentSelection: "sandbox",
+      loadBalancedEnvironmentId: null,
+      branch: null,
+      worktreePath: null,
+    });
+  }, [composerHasAttachments, draftId, envLocked, setDraftThreadContext]);
+  const sandboxLabel = sandboxSelected
+    ? sandboxDraftLaunch.launching
+      ? "Creating sandbox…"
+      : "New sandbox"
+    : undefined;
 
   const activeTerminalGroup =
     terminalUiState.terminalGroups.find(
@@ -8394,6 +8431,32 @@ export default function ChatView(props: ChatViewProps) {
       notifyDirectAnnotationAttached();
       return;
     }
+    if (sandboxSelected && activeProject && sandboxRepositoryUrl && draftId) {
+      // The send restarts from the sandbox once the draft has moved there:
+      // this render's environment and project would still target the host.
+      if (sandboxDraftLaunch.launching) return;
+      void sandboxDraftLaunch
+        .launch({
+          hostEnvironmentId: environmentId,
+          repositoryUrl: sandboxRepositoryUrl,
+          label: sandboxLabelFromPrompt(promptRef.current),
+          logicalProjectKey: deriveLogicalProjectKeyFromSettings(
+            activeProject,
+            projectGroupingSettings,
+          ),
+          projectGroupingSettings,
+        })
+        .then((target) => {
+          if (!target) return;
+          setDraftThreadContext(draftId, {
+            projectRef: scopeProjectRef(target.environmentId, target.projectId),
+            environmentSelection: "manual",
+            loadBalancedEnvironmentId: null,
+          });
+          pendingSandboxSendRef.current = target.environmentId;
+        });
+      return;
+    }
     if (needsLoadBalancing) {
       toastManager.add({
         type: "warning",
@@ -10105,6 +10168,17 @@ export default function ChatView(props: ChatViewProps) {
     return false;
   }
 
+  // Finishes a send that first created a sandbox, once the draft has moved
+  // into it and this render targets the sandbox's environment and project.
+  const resendInSandbox = useEffectEvent(() => {
+    void onSend();
+  });
+  useEffect(() => {
+    if (pendingSandboxSendRef.current !== environmentId) return;
+    pendingSandboxSendRef.current = null;
+    resendInSandbox();
+  }, [environmentId]);
+
   const onImplementPlanInNewThread = useCallback(async () => {
     if (
       !activeThread ||
@@ -11381,8 +11455,14 @@ export default function ChatView(props: ChatViewProps) {
                                 {...(canCheckoutPullRequestIntoThread
                                   ? { onCheckoutPullRequestRequest: openPullRequestDialog }
                                   : {})}
-                                {...(hasMultipleEnvironments ? { onEnvironmentChange } : {})}
+                                {...(hasMultipleEnvironments || sandboxAvailable
+                                  ? { onEnvironmentChange }
+                                  : {})}
                                 autoEnvironmentLabel={autoEnvironmentLabel}
+                                sandboxLabel={sandboxLabel}
+                                onSandboxEnvironment={
+                                  sandboxAvailable ? onSandboxEnvironment : undefined
+                                }
                                 onAutoEnvironment={
                                   draftId &&
                                   !envLocked &&

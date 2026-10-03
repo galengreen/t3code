@@ -2,7 +2,7 @@ import { ThreadDetailsSelectControl } from "./chat/ThreadDetailsControl";
 import { ComposerContextLabel } from "./ComposerContextLabel";
 import { Tooltip, TooltipTrigger, TooltipPopup } from "./ui/tooltip";
 import type { EnvironmentId } from "@t3tools/contracts";
-import { ScaleIcon } from "lucide-react";
+import { BoxIcon, ScaleIcon } from "lucide-react";
 import { memo, useMemo } from "react";
 
 import type { EnvironmentOption } from "./BranchToolbar.logic";
@@ -25,6 +25,10 @@ import {
 interface BranchToolbarEnvironmentSelectorProps {
   autoEnvironmentLabel?: string | undefined;
   onAutoEnvironment?: (() => void) | undefined;
+  /** Set while the draft will start in a new sandbox; the label to show. */
+  sandboxLabel?: string | undefined;
+  /** Offers "New sandbox" when the current environment can create one. */
+  onSandboxEnvironment?: (() => void) | undefined;
   envLocked: boolean;
   environmentId: EnvironmentId;
   availableEnvironments: readonly EnvironmentOption[];
@@ -35,6 +39,8 @@ interface BranchToolbarEnvironmentSelectorProps {
 export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvironmentSelector({
   autoEnvironmentLabel,
   onAutoEnvironment,
+  sandboxLabel,
+  onSandboxEnvironment,
   envLocked,
   environmentId,
   availableEnvironments,
@@ -55,8 +61,15 @@ export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvir
         value: env.environmentId,
         label: env.label,
       })),
+      ...(onSandboxEnvironment ? [{ value: "sandbox", label: sandboxLabel ?? "New sandbox" }] : []),
     ],
-    [availableEnvironments, autoEnvironmentLabel, onAutoEnvironment],
+    [
+      availableEnvironments,
+      autoEnvironmentLabel,
+      onAutoEnvironment,
+      onSandboxEnvironment,
+      sandboxLabel,
+    ],
   );
 
   // The static label carries the xs control's height (h-7 sm:h-6) as well as
@@ -93,9 +106,13 @@ export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvir
   return (
     <Select
       modal={false}
-      value={autoEnvironmentLabel ? "auto" : environmentId}
+      value={sandboxLabel ? "sandbox" : autoEnvironmentLabel ? "auto" : environmentId}
       onValueChange={(value) =>
-        value === "auto" ? onAutoEnvironment?.() : onEnvironmentChange(value as EnvironmentId)
+        value === "sandbox"
+          ? onSandboxEnvironment?.()
+          : value === "auto"
+            ? onAutoEnvironment?.()
+            : onEnvironmentChange(value as EnvironmentId)
       }
       items={environmentItems}
     >
@@ -111,7 +128,14 @@ export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvir
             />
           }
         >
-          {autoEnvironmentLabel ? (
+          {sandboxLabel ? (
+            <BoxIcon
+              className={
+                displayMode === "panel" ? THREAD_DETAILS_PANEL_ICON_CLASS : "size-3 shrink-0"
+              }
+              aria-hidden="true"
+            />
+          ) : autoEnvironmentLabel ? (
             <ScaleIcon
               className={
                 displayMode === "panel" ? THREAD_DETAILS_PANEL_ICON_CLASS : "size-3 shrink-0"
@@ -130,7 +154,11 @@ export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvir
             <SelectValue />
           </ComposerContextLabel>
         </TooltipTrigger>
-        <TooltipPopup>{autoEnvironmentLabel ?? activeEnvironment?.label ?? "Run on"}</TooltipPopup>
+        <TooltipPopup>
+          {sandboxLabel
+            ? `${sandboxLabel} on ${activeEnvironment?.label ?? "this machine"}`
+            : (autoEnvironmentLabel ?? activeEnvironment?.label ?? "Run on")}
+        </TooltipPopup>
       </Tooltip>
       <SelectPopup
         alignItemWithTrigger={false}
@@ -164,6 +192,14 @@ export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvir
               </span>
             </SelectItem>
           ))}
+          {onSandboxEnvironment && (
+            <SelectItem value="sandbox">
+              <span className="inline-flex items-center gap-1.5">
+                <BoxIcon className="size-3" aria-hidden="true" />
+                {sandboxLabel ?? "New sandbox"}
+              </span>
+            </SelectItem>
+          )}
         </SelectGroup>
       </SelectPopup>
     </Select>
