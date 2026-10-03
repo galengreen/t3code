@@ -6,6 +6,7 @@ import { HttpClient, HttpClientResponse } from "effect/unstable/http";
 
 import * as ProcessRunner from "../processRunner.ts";
 import * as ServerSettings from "../serverSettings.ts";
+import * as DockerSandboxDriver from "./DockerSandboxDriver.ts";
 import * as SandboxService from "./SandboxService.ts";
 
 interface FakeContainer {
@@ -19,6 +20,7 @@ const fakeDocker = () => {
   const containers = new Map<string, FakeContainer>();
   const volumes = new Set<string>();
   const calls: string[][] = [];
+  const envs: Array<NodeJS.ProcessEnv | undefined> = [];
   const output = (stdout: string, code = 0, stderr = "") => ({
     stdout,
     stderr,
@@ -41,8 +43,9 @@ const fakeDocker = () => {
     },
     Name: name,
   });
-  const run = (args: ReadonlyArray<string>) => {
+  const run = (args: ReadonlyArray<string>, env?: NodeJS.ProcessEnv) => {
     calls.push([...args]);
+    envs.push(env);
     const [command, ...rest] = args;
     switch (command) {
       case "ps": {
@@ -87,11 +90,12 @@ const fakeDocker = () => {
         return output("", 1, `unexpected docker ${command}`);
     }
   };
-  return { containers, volumes, calls, run };
+  return { containers, volumes, calls, envs, run };
 };
 
 const serviceLayer = (docker: ReturnType<typeof fakeDocker>, enableSandboxes = true) =>
   SandboxService.layer.pipe(
+    Layer.provide(DockerSandboxDriver.layer),
     Layer.provide(
       ServerSettings.layerTest({
         enableSandboxes,
@@ -101,7 +105,7 @@ const serviceLayer = (docker: ReturnType<typeof fakeDocker>, enableSandboxes = t
     ),
     Layer.provide(
       Layer.succeed(ProcessRunner.ProcessRunner, {
-        run: (input) => Effect.sync(() => docker.run(input.args)),
+        run: (input) => Effect.sync(() => docker.run(input.args, input.env)),
       }),
     ),
     Layer.provide(
