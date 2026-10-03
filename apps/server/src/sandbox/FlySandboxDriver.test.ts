@@ -16,7 +16,8 @@ interface FakeApp {
 }
 
 /** A tiny Machines API that keeps apps in memory and records each call. */
-const fakeFly = (options: { failMachineCreate?: boolean } = {}) => {
+const fakeFly = (options: { failMachineCreate?: boolean; waitTimeouts?: number } = {}) => {
+  let waitTimeouts = options.waitTimeouts ?? 0;
   const apps = new Map<string, FakeApp>();
   const calls: Array<{ method: string; path: string; body: unknown; authorization: string }> = [];
   const client = HttpClient.make((request) =>
@@ -78,7 +79,13 @@ const fakeFly = (options: { failMachineCreate?: boolean } = {}) => {
       }
       const machine = entry.machines.find((candidate) => candidate.id === machineId);
       if (!machine) return reply(404, { error: "no machine" });
-      if (action === "wait") return reply(200, { ok: true });
+      if (action === "wait") {
+        if (waitTimeouts > 0) {
+          waitTimeouts -= 1;
+          return reply(408, { error: "deadline_exceeded" });
+        }
+        return reply(200, { ok: true });
+      }
       if (action === "stop") machine.state = "stopped";
       if (action === "start") machine.state = "started";
       if (action === "exec") {
@@ -147,6 +154,17 @@ describe("FlySandboxDriver", () => {
             httpBaseUrl: "https://t3-sbx-abc123def456.fly.dev",
           },
         ]);
+      }),
+    );
+  });
+
+  it.effect("keeps waiting while Fly says the machine is still starting", () => {
+    const fly = fakeFly({ waitTimeouts: 2 });
+    return run(fly, (driver) =>
+      Effect.gen(function* () {
+        yield* driver.create(spec);
+        expect(fly.calls.filter((call) => call.path.includes("/wait")).length).toBe(3);
+        expect(fly.apps.size).toBe(1);
       }),
     );
   });

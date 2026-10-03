@@ -34,6 +34,7 @@ const APP_PREFIX = "t3-sbx-";
 const SANDBOX_PORT = 7777;
 /** The first start in a region pulls the image, which can take minutes. */
 const START_TIMEOUT_SECONDS = 300;
+const WAIT_SECONDS = 60;
 
 const appName = (id: SandboxId) => `${APP_PREFIX}${id}`;
 
@@ -174,8 +175,8 @@ const makeCall =
             })),
           ),
         ),
-        // Waits for state run server-side for up to their own timeout.
-        Effect.timeout(`${START_TIMEOUT_SECONDS + 30} seconds`),
+        // Waits for state are held server-side for up to a minute.
+        Effect.timeout(`${WAIT_SECONDS + 30} seconds`),
         Effect.mapError((cause) => new SandboxOperationError({ operation, id, cause })),
         Effect.flatMap((response) =>
           response.status === 401
@@ -285,20 +286,30 @@ export const make = Effect.gen(function* () {
       ),
     );
 
-  const waitFor = (
+  /** Fly holds each wait for at most a minute and answers 408 when it runs out. */
+  const waitFor = Effect.fn("FlySandboxDriver.waitFor")(function* (
     token: string,
     id: SandboxId,
     machineId: string,
     state: "started" | "stopped",
     operation: SandboxOperation,
-  ) =>
-    call(
-      token,
-      "GET",
-      `/v1/apps/${appName(id)}/machines/${machineId}/wait?state=${state}&timeout=${START_TIMEOUT_SECONDS}`,
+  ) {
+    for (let waited = 0; waited < START_TIMEOUT_SECONDS; waited += WAIT_SECONDS) {
+      const response = yield* call(
+        token,
+        "GET",
+        `/v1/apps/${appName(id)}/machines/${machineId}/wait?state=${state}&timeout=${WAIT_SECONDS}`,
+        operation,
+        id,
+      );
+      if (response.status !== 408) return yield* expectOk(response, operation, id);
+    }
+    return yield* new SandboxOperationError({
       operation,
       id,
-    ).pipe(Effect.flatMap((response) => expectOk(response, operation, id)));
+      cause: `The machine was not ${state} after ${START_TIMEOUT_SECONDS} seconds.`,
+    });
+  });
 
   const list: SandboxDriver["list"] = Effect.gen(function* () {
     const fly = yield* configured;
@@ -388,7 +399,18 @@ export const make = Effect.gen(function* () {
             },
           ],
         },
-      }).pipe(Effect.flatMap(decodeOr(decodeMachine)("create", spec.id)));
+      }).pipe(
+        Effect.catchIf(
+          (error) => String(error.cause).includes("failed to get manifest"),
+          () =>
+            Effect.fail(
+              new SandboxUnavailableError({
+                reason: `Fly could not find the image ${spec.image}. Fly pulls images from a registry, so set the sandbox image to a registry reference such as registry.fly.io/<app>:latest.`,
+              }),
+            ),
+        ),
+        Effect.flatMap(decodeOr(decodeMachine)("create", spec.id)),
+      );
       yield* waitFor(fly.apiToken, spec.id, machine.id, "started", "create");
     }).pipe(
       // A half-built app would keep billing for its IPs and machine, so take it down.
