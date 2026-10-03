@@ -14,7 +14,7 @@ import type { ConnectionCatalogEntry } from "../connection/catalog.ts";
 import * as ConnectionOnboarding from "../connection/onboarding.ts";
 import * as EnvironmentRegistry from "../connection/registry.ts";
 import { request } from "../rpc/client.ts";
-import { createEnvironmentRpcCommand } from "./runtime.ts";
+import { createEnvironmentRpcCommand, createEnvironmentRpcQueryAtomFamily } from "./runtime.ts";
 
 /** Commands against a host environment's sandbox service. */
 export function createSandboxEnvironmentAtoms<R, E>(
@@ -32,6 +32,16 @@ export function createSandboxEnvironmentAtoms<R, E>(
     pair: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:sandbox:pair",
       tag: WS_METHODS.sandboxPair,
+    }),
+    /** What the saved Fly token can reach. */
+    flyAccount: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:sandbox:fly-account",
+      tag: WS_METHODS.sandboxFlyAccount,
+    }),
+    /** Checks a pasted Fly token before it is saved. */
+    checkFlyToken: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:sandbox:check-fly-token",
+      tag: WS_METHODS.sandboxFlyAccount,
     }),
   };
 }
