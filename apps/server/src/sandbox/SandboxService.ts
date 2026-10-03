@@ -7,7 +7,8 @@
  * The configured image must start a T3 server on port 7777 and put `t3` on
  * PATH, which pairing uses to mint a credential inside the sandbox. It reads
  * `T3_SANDBOX_LABEL` (the environment's name) and `REPO_URL` (cloned on first
- * start).
+ * start). Every sandbox also starts with the host's `sandboxEnvironment`
+ * variables, such as an agent login token.
  */
 import {
   SandboxNotRunningError,
@@ -132,7 +133,9 @@ const make = Effect.gen(function* () {
         id,
         label,
         image: current.sandboxImage,
+        // The image's own variables come last so the host's list cannot replace them.
         environment: [
+          ...current.sandboxEnvironment,
           { name: "T3_HOST", value: "0.0.0.0", sensitive: false },
           { name: "T3_SANDBOX_LABEL", value: label, sensitive: false },
           ...(input.repositoryUrl

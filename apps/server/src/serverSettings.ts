@@ -144,6 +144,10 @@ function providerEnvironmentSecretName(input: {
   return `provider-env-${Buffer.from(input.instanceId, "utf8").toString("base64url")}-${Buffer.from(input.name, "utf8").toString("base64url")}`;
 }
 
+function sandboxEnvironmentSecretName(name: string): string {
+  return `sandbox-env-${Buffer.from(name, "utf8").toString("base64url")}`;
+}
+
 /**
  * On disk a hub key or Bitbucket token is replaced by this marker and the
  * real value lives in the secret store, mirroring provider environment
@@ -204,7 +208,8 @@ export function redactServerSettingsForClient(settings: ServerSettings): ServerS
     accessToken: redactSecret(settings.bitbucket.accessToken),
     apiToken: redactSecret(settings.bitbucket.apiToken),
   };
-  return { ...settings, providerInstances, usageLimitSources, bitbucket };
+  const sandboxEnvironment = settings.sandboxEnvironment.map(redactProviderEnvironmentVariable);
+  return { ...settings, providerInstances, usageLimitSources, bitbucket, sandboxEnvironment };
 }
 
 export function applyProviderInstanceMutation(
@@ -809,6 +814,33 @@ const make = Effect.gen(function* () {
 
   const getSettingsFromCache = Cache.get(settingsCache, cacheKey);
 
+  /** Fills in the stored values of one environment list's sensitive variables. */
+  const materializeEnvironment = (
+    environment: ReadonlyArray<ProviderInstanceEnvironmentVariable>,
+    secretNameOf: (name: string) => string,
+    scope: { readonly providerInstanceId?: string },
+  ) =>
+    Effect.forEach(environment, (variable) =>
+      !variable.sensitive || !variable.valueRedacted
+        ? Effect.succeed(variable)
+        : secretStore.get(secretNameOf(variable.name)).pipe(
+            Effect.mapError(
+              (cause) =>
+                new ServerSettingsError({
+                  settingsPath,
+                  operation: "read-secret",
+                  ...scope,
+                  environmentVariable: variable.name,
+                  cause,
+                }),
+            ),
+            Effect.map((secret) => ({
+              ...variable,
+              value: Option.isSome(secret) ? textDecoder.decode(secret.value) : "",
+            })),
+          ),
+    );
+
   const materializeProviderEnvironmentSecrets = (
     settings: ServerSettings,
   ): Effect.Effect<ServerSettings, ServerSettingsError> =>
@@ -818,36 +850,21 @@ const make = Effect.gen(function* () {
       };
       for (const [instanceId, instance] of Object.entries(settings.providerInstances)) {
         if (!instance.environment) continue;
-        const environment: ProviderInstanceEnvironmentVariable[] = [];
-        for (const variable of instance.environment) {
-          if (!variable.sensitive || !variable.valueRedacted) {
-            environment.push(variable);
-            continue;
-          }
-          const secret = yield* secretStore
-            .get(providerEnvironmentSecretName({ instanceId, name: variable.name }))
-            .pipe(
-              Effect.mapError(
-                (cause) =>
-                  new ServerSettingsError({
-                    settingsPath,
-                    operation: "read-secret",
-                    providerInstanceId: instanceId,
-                    environmentVariable: variable.name,
-                    cause,
-                  }),
-              ),
-            );
-          environment.push({
-            ...variable,
-            value: Option.isSome(secret) ? textDecoder.decode(secret.value) : "",
-          });
-        }
+        const environment = yield* materializeEnvironment(
+          instance.environment,
+          (name) => providerEnvironmentSecretName({ instanceId, name }),
+          { providerInstanceId: instanceId },
+        );
         providerInstances[instanceId] = {
           ...instance,
           environment,
         } satisfies ProviderInstanceConfig;
       }
+      const sandboxEnvironment = yield* materializeEnvironment(
+        settings.sandboxEnvironment,
+        sandboxEnvironmentSecretName,
+        {},
+      );
       const usageLimitSources: Record<string, UsageLimitSourceConfig> = {};
       for (const [sourceId, source] of Object.entries(settings.usageLimitSources)) {
         if (source.managementKey !== SECRET_REDACTED) {
@@ -883,6 +900,7 @@ const make = Effect.gen(function* () {
         providerInstances: providerInstances as ServerSettings["providerInstances"],
         usageLimitSources: usageLimitSources as ServerSettings["usageLimitSources"],
         bitbucket,
+        sandboxEnvironment,
       };
     });
 
@@ -912,6 +930,69 @@ const make = Effect.gen(function* () {
     | { readonly kind: "remove"; readonly operation: "remove-secret" | "remove-stale-secret" }
   );
 
+  /**
+   * Turns one environment list's sensitive values into secret store changes
+   * and returns the list as saved, with those values replaced by markers.
+   * `current` is the saved list being replaced.
+   */
+  const persistEnvironment = (
+    current: ReadonlyArray<ProviderInstanceEnvironmentVariable>,
+    next: ReadonlyArray<ProviderInstanceEnvironmentVariable>,
+    secretNameOf: (name: string) => string,
+    scope: { readonly providerInstanceId?: string },
+    changes: SecretChange[],
+  ): ProviderInstanceEnvironmentVariable[] => {
+    const environment: ProviderInstanceEnvironmentVariable[] = [];
+    const nextSecretNames = new Set<string>();
+    for (const variable of next) {
+      const secretName = secretNameOf(variable.name);
+      const context = { secretName, ...scope, environmentVariable: variable.name };
+      if (!variable.sensitive) {
+        changes.push({ kind: "remove", ...context, operation: "remove-secret" });
+        environment.push(redactProviderEnvironmentVariable(variable));
+        continue;
+      }
+
+      nextSecretNames.add(secretName);
+      // Match the provider environment's last-value-wins behavior for duplicate names.
+      const previous = variable.valueRedacted
+        ? current.findLast((entry) => entry.name === variable.name)
+        : undefined;
+      const inlineValue =
+        previous?.sensitive && !previous.valueRedacted && previous.value.length > 0
+          ? previous.value
+          : undefined;
+      const value = inlineValue ?? variable.value;
+      if (!variable.valueRedacted || inlineValue !== undefined) {
+        if (value.length > 0) {
+          changes.push({ kind: "write", ...context, value: textEncoder.encode(value) });
+          environment.push({ ...variable, value: "", valueRedacted: true });
+        } else {
+          changes.push({ kind: "remove", ...context, operation: "remove-secret" });
+          const { valueRedacted: _omit, ...rest } = variable;
+          environment.push(rest);
+        }
+        continue;
+      }
+
+      environment.push(redactProviderEnvironmentVariable(variable));
+    }
+
+    for (const variable of current) {
+      if (!variable.sensitive) continue;
+      const secretName = secretNameOf(variable.name);
+      if (nextSecretNames.has(secretName)) continue;
+      changes.push({
+        kind: "remove",
+        secretName,
+        ...scope,
+        environmentVariable: variable.name,
+        operation: "remove-stale-secret",
+      });
+    }
+    return environment;
+  };
+
   const persistProviderEnvironmentSecrets = (current: ServerSettings, next: ServerSettings) =>
     Effect.sync(() => {
       const providerInstances: Record<string, ProviderInstanceConfig> = {
@@ -919,82 +1000,34 @@ const make = Effect.gen(function* () {
       };
       const changes: SecretChange[] = [];
 
-      const nextSecretKeys = new Set<string>();
-      for (const [instanceId, instance] of Object.entries(next.providerInstances)) {
-        if (!instance.environment) continue;
-        const environment: ProviderInstanceEnvironmentVariable[] = [];
-        for (const variable of instance.environment) {
-          const secretName = providerEnvironmentSecretName({ instanceId, name: variable.name });
-          if (!variable.sensitive) {
-            changes.push({
-              kind: "remove",
-              secretName,
-              operation: "remove-secret",
-              providerInstanceId: instanceId,
-              environmentVariable: variable.name,
-            });
-            environment.push(redactProviderEnvironmentVariable(variable));
-            continue;
-          }
-
-          nextSecretKeys.add(secretName);
-          // Match the provider environment's last-value-wins behavior for duplicate names.
-          const previous = variable.valueRedacted
-            ? current.providerInstances[ProviderInstanceId.make(instanceId)]?.environment?.findLast(
-                (entry) => entry.name === variable.name,
-              )
-            : undefined;
-          const inlineValue =
-            previous?.sensitive && !previous.valueRedacted && previous.value.length > 0
-              ? previous.value
-              : undefined;
-          const value = inlineValue ?? variable.value;
-          if (!variable.valueRedacted || inlineValue !== undefined) {
-            if (value.length > 0) {
-              changes.push({
-                kind: "write",
-                secretName,
-                value: textEncoder.encode(value),
-                providerInstanceId: instanceId,
-                environmentVariable: variable.name,
-              });
-              environment.push({ ...variable, value: "", valueRedacted: true });
-            } else {
-              changes.push({
-                kind: "remove",
-                secretName,
-                operation: "remove-secret",
-                providerInstanceId: instanceId,
-                environmentVariable: variable.name,
-              });
-              const { valueRedacted: _omit, ...rest } = variable;
-              environment.push(rest);
-            }
-            continue;
-          }
-
-          environment.push(redactProviderEnvironmentVariable(variable));
-        }
-        providerInstances[instanceId] = {
-          ...instance,
-          environment,
-        } satisfies ProviderInstanceConfig;
-      }
-
-      for (const [instanceId, instance] of Object.entries(current.providerInstances)) {
-        for (const variable of instance.environment ?? []) {
-          if (!variable.sensitive) continue;
-          const secretName = providerEnvironmentSecretName({ instanceId, name: variable.name });
-          if (nextSecretKeys.has(secretName)) continue;
-          changes.push({
-            kind: "remove",
-            secretName,
-            operation: "remove-stale-secret",
-            providerInstanceId: instanceId,
-            environmentVariable: variable.name,
-          });
+      const instanceIds = new Set([
+        ...Object.keys(current.providerInstances),
+        ...Object.keys(next.providerInstances),
+      ]);
+      for (const instanceId of instanceIds) {
+        const id = ProviderInstanceId.make(instanceId);
+        const instance = next.providerInstances[id];
+        const environment = persistEnvironment(
+          current.providerInstances[id]?.environment ?? [],
+          instance?.environment ?? [],
+          (name) => providerEnvironmentSecretName({ instanceId, name }),
+          { providerInstanceId: instanceId },
+          changes,
+        );
+        if (instance?.environment) {
+          providerInstances[instanceId] = {
+            ...instance,
+            environment,
+          } satisfies ProviderInstanceConfig;
         }
       }
+      const sandboxEnvironment = persistEnvironment(
+        current.sandboxEnvironment,
+        next.sandboxEnvironment,
+        sandboxEnvironmentSecretName,
+        {},
+        changes,
+      );
 
       const usageLimitSources: Record<string, UsageLimitSourceConfig> = {};
       for (const [sourceId, source] of Object.entries(next.usageLimitSources)) {
@@ -1049,6 +1082,7 @@ const make = Effect.gen(function* () {
           providerInstances: providerInstances as ServerSettings["providerInstances"],
           usageLimitSources: usageLimitSources as ServerSettings["usageLimitSources"],
           bitbucket,
+          sandboxEnvironment,
         },
         changes,
       };

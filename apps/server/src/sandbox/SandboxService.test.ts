@@ -101,6 +101,10 @@ const serviceLayer = (docker: ReturnType<typeof fakeDocker>, enableSandboxes = t
         enableSandboxes,
         sandboxImage: "sandbox:test",
         sandboxPublishHost: "100.64.0.7",
+        sandboxEnvironment: [
+          { name: "CLAUDE_CODE_OAUTH_TOKEN", value: "sk-ant-oat-secret", sensitive: true },
+          { name: "GIT_AUTHOR_NAME", value: "Sandbox", sensitive: false },
+        ],
       }),
     ),
     Layer.provide(
@@ -153,6 +157,29 @@ describe("SandboxService", () => {
       expect((yield* sandboxes.list).map((sandbox) => sandbox.id)).toEqual([created.id]);
     }).pipe(Effect.provide(serviceLayer(docker)));
   });
+
+  it.effect(
+    "starts sandboxes with the host's variables, keeping secrets off the command line",
+    () => {
+      const docker = fakeDocker();
+      return Effect.gen(function* () {
+        const sandboxes = yield* SandboxService.SandboxService;
+        yield* sandboxes.create({ label: "Fix login" });
+        const runIndex = docker.calls.findIndex((args) => args[0] === "run");
+        const run = docker.calls[runIndex]!;
+        expect(run).toEqual(
+          expect.arrayContaining([
+            "--env",
+            "CLAUDE_CODE_OAUTH_TOKEN",
+            "--env",
+            "GIT_AUTHOR_NAME=Sandbox",
+          ]),
+        );
+        expect(run.join(" ")).not.toContain("sk-ant-oat-secret");
+        expect(docker.envs[runIndex]).toEqual({ CLAUDE_CODE_OAUTH_TOKEN: "sk-ant-oat-secret" });
+      }).pipe(Effect.provide(serviceLayer(docker)));
+    },
+  );
 
   it.effect("stops, restarts, pairs with, and removes a sandbox with its volume", () => {
     const docker = fakeDocker();

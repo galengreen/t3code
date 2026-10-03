@@ -34,6 +34,7 @@ import {
 } from "./preview.ts";
 import {
   ProviderInstanceConfig,
+  ProviderInstanceEnvironment,
   ProviderInstanceId,
   type ProviderDriverKind,
 } from "./providerInstance.ts";
@@ -1286,6 +1287,14 @@ export const ServerSettings = Schema.Struct({
   sandboxPublishHost: TrimmedNonEmptyString.pipe(
     Schema.withDecodingDefault(Effect.succeed("127.0.0.1")),
   ),
+  /**
+   * Variables every new sandbox starts with, such as an agent's login token
+   * (`CLAUDE_CODE_OAUTH_TOKEN` from `claude setup-token`). Sensitive values
+   * live in the secret store, as provider instance variables do.
+   */
+  sandboxEnvironment: ProviderInstanceEnvironment.pipe(
+    Schema.withDecodingDefault(Effect.succeed([])),
+  ),
   sidebarAutoSettleAfterDays: Schema.NullOr(SidebarAutoSettleAfterDays).pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_SIDEBAR_AUTO_SETTLE_AFTER_DAYS)),
   ),
@@ -1650,6 +1659,7 @@ export const ServerSettingsPatch = Schema.Struct({
   enableSandboxes: Schema.optionalKey(Schema.Boolean),
   sandboxImage: Schema.optionalKey(TrimmedNonEmptyString),
   sandboxPublishHost: Schema.optionalKey(TrimmedNonEmptyString),
+  sandboxEnvironment: Schema.optionalKey(ProviderInstanceEnvironment),
   deviceOnboardingCompleted: Schema.optionalKey(Schema.Boolean),
   deviceHosts: Schema.optionalKey(SshDeviceHostConfigs),
   sidebarAutoSettleAfterDays: Schema.optionalKey(Schema.NullOr(SidebarAutoSettleAfterDays)),

@@ -1566,6 +1566,48 @@ it.layer(NodeServices.layer)("server settings", (it) => {
       }).pipe(Effect.provide(makeServerSettingsLayerWithSecrets())),
   );
 
+  it.effect("keeps sensitive sandbox variables in the secret store until they are removed", () =>
+    Effect.gen(function* () {
+      const serverSettings = yield* ServerSettingsModule.ServerSettingsService;
+      const secrets = yield* ServerSecretStore.ServerSecretStore;
+      const serverConfig = yield* ServerConfig.ServerConfig;
+      const fileSystem = yield* FileSystem.FileSystem;
+
+      const saved = yield* serverSettings.updateSettings({
+        sandboxEnvironment: [
+          { name: "CLAUDE_CODE_OAUTH_TOKEN", value: "sk-ant-oat-secret", sensitive: true },
+          { name: "GIT_AUTHOR_NAME", value: "Sandbox", sensitive: false },
+        ],
+      });
+      assert.equal(saved.sandboxEnvironment[0]?.value, "sk-ant-oat-secret");
+      assert.notInclude(
+        yield* fileSystem.readFileString(serverConfig.settingsPath),
+        "sk-ant-oat-secret",
+      );
+
+      // Clients see only that a value is stored, and echoing that back keeps it.
+      const forClient = ServerSettingsModule.redactServerSettingsForClient(saved);
+      assert.deepEqual(forClient.sandboxEnvironment[0], {
+        name: "CLAUDE_CODE_OAUTH_TOKEN",
+        value: "",
+        sensitive: true,
+        valueRedacted: true,
+      });
+      yield* serverSettings.updateSettings({ sandboxEnvironment: forClient.sandboxEnvironment });
+      assert.equal(
+        (yield* serverSettings.getSettings).sandboxEnvironment[0]?.value,
+        "sk-ant-oat-secret",
+      );
+
+      const secretName = `sandbox-env-${Buffer.from("CLAUDE_CODE_OAUTH_TOKEN").toString("base64url")}`;
+      assert.isTrue(Option.isSome(yield* secrets.get(secretName)));
+      yield* serverSettings.updateSettings({
+        sandboxEnvironment: forClient.sandboxEnvironment.slice(1),
+      });
+      assert.isTrue(Option.isNone(yield* secrets.get(secretName)));
+    }).pipe(Effect.provide(makeServerSettingsLayerWithSecrets())),
+  );
+
   it.effect("removes a Bitbucket secret once its token is cleared by hand in settings.json", () =>
     Effect.gen(function* () {
       const serverConfig = yield* ServerConfig.ServerConfig;
