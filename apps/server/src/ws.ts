@@ -178,6 +178,7 @@ import * as TerminalManager from "./terminal/Manager.ts";
 import { withTerminalOutputWindow } from "./terminal/OutputProtocol.ts";
 import * as PreviewAutomationBroker from "./mcp/PreviewAutomationBroker.ts";
 import * as DeviceService from "./device/DeviceService.ts";
+import * as SandboxService from "./sandbox/SandboxService.ts";
 import { remoteSshDeviceHosts } from "./device/localSshDeviceHost.ts";
 import * as PreviewManager from "./preview/Manager.ts";
 import { issueAssetUrl } from "./assets/AssetAccess.ts";
@@ -1218,6 +1219,7 @@ const makeWsRpcLayer = (
       const pullRequests = yield* PullRequestService.PullRequestService;
       const pullRequestSync = yield* PullRequestSyncReactor.PullRequestSyncReactor;
       const deviceService = yield* DeviceService.DeviceService;
+      const sandboxService = yield* SandboxService.SandboxService;
       const deviceHostContext =
         yield* Effect.context<Effect.Services<ReturnType<typeof remoteSshDeviceHosts>>>();
       const orchestrationEngine = yield* Orchestrator.OrchestratorV2;
@@ -3556,6 +3558,30 @@ const makeWsRpcLayer = (
         [WS_METHODS.deviceAction]: (input) =>
           observeRpcEffect(WS_METHODS.deviceAction, deviceService.action(input), {
             "rpc.aggregate": "device",
+          }),
+        [WS_METHODS.sandboxList]: (_input) =>
+          observeRpcEffect(WS_METHODS.sandboxList, sandboxService.list, {
+            "rpc.aggregate": "sandbox",
+          }),
+        [WS_METHODS.sandboxCreate]: (input) =>
+          observeRpcEffect(WS_METHODS.sandboxCreate, sandboxService.create(input), {
+            "rpc.aggregate": "sandbox",
+          }),
+        [WS_METHODS.sandboxStart]: (input) =>
+          observeRpcEffect(WS_METHODS.sandboxStart, sandboxService.start(input), {
+            "rpc.aggregate": "sandbox",
+          }),
+        [WS_METHODS.sandboxStop]: (input) =>
+          observeRpcEffect(WS_METHODS.sandboxStop, sandboxService.stop(input), {
+            "rpc.aggregate": "sandbox",
+          }),
+        [WS_METHODS.sandboxRemove]: (input) =>
+          observeRpcEffect(WS_METHODS.sandboxRemove, sandboxService.remove(input), {
+            "rpc.aggregate": "sandbox",
+          }),
+        [WS_METHODS.sandboxPair]: (input) =>
+          observeRpcEffect(WS_METHODS.sandboxPair, sandboxService.pair(input), {
+            "rpc.aggregate": "sandbox",
           }),
         [WS_METHODS.subscribeDeviceState]: (_input) =>
           observeRpcStream(

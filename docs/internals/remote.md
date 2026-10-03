@@ -58,6 +58,20 @@ describes the server. Process replacement belongs to the launcher's
 [update protocol](./server-updates.md); the connection runtime handles the
 resulting disconnect.
 
+### Sandboxes
+
+A host environment can create sandboxes: Docker containers that each run their
+own T3 server, so a paired client sees a complete environment. The
+[sandbox service](../../apps/server/src/sandbox/SandboxService.ts) only creates,
+starts, stops, removes, and mints pairing credentials; it never runs work inside
+one. Docker is the record: containers carry `t3code.sandbox.*` labels and are
+read back with `docker inspect`, so there is no sandbox table to drift.
+
+A sandbox publishes its server on the host's loopback only, and Docker assigns a
+new port each time it starts. Clients therefore cannot keep a sandbox's address;
+reaching one from another device has to go through the host. Sandboxes are off
+by default because access to the Docker daemon is effectively root on the host.
+
 ### Desktop without a local environment
 
 Desktop normally launches its own primary server, but the desktop setting `localEnvironmentEnabled`

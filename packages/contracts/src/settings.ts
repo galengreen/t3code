@@ -1269,6 +1269,15 @@ export const ServerSettings = Schema.Struct({
   /** Whether the server-local Device panel setup flow has been completed. */
   deviceOnboardingCompleted: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   deviceHosts: SshDeviceHostConfigs.pipe(Schema.withDecodingDefault(Effect.succeed([]))),
+  /**
+   * Whether this server may create sandboxes with Docker. Off by default:
+   * access to the Docker daemon is effectively root on the host.
+   */
+  enableSandboxes: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  /** Image each new sandbox runs; it must start a T3 server on port 7777. */
+  sandboxImage: TrimmedNonEmptyString.pipe(
+    Schema.withDecodingDefault(Effect.succeed("t3code-sandbox:latest")),
+  ),
   sidebarAutoSettleAfterDays: Schema.NullOr(SidebarAutoSettleAfterDays).pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_SIDEBAR_AUTO_SETTLE_AFTER_DAYS)),
   ),
@@ -1630,6 +1639,8 @@ export const ServerSettingsPatch = Schema.Struct({
   ),
   enableAgentDeviceAccess: Schema.optionalKey(Schema.Boolean),
   enableDeviceSupport: Schema.optionalKey(Schema.Boolean),
+  enableSandboxes: Schema.optionalKey(Schema.Boolean),
+  sandboxImage: Schema.optionalKey(TrimmedNonEmptyString),
   deviceOnboardingCompleted: Schema.optionalKey(Schema.Boolean),
   deviceHosts: Schema.optionalKey(SshDeviceHostConfigs),
   sidebarAutoSettleAfterDays: Schema.optionalKey(Schema.NullOr(SidebarAutoSettleAfterDays)),

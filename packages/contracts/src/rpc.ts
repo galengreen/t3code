@@ -260,6 +260,13 @@ import {
   DeviceShutdownInput,
 } from "./device.ts";
 import {
+  SandboxCreateInput,
+  SandboxError,
+  SandboxIdInput,
+  SandboxPairing,
+  SandboxSummary,
+} from "./sandbox.ts";
+import {
   PreviewAutomationError,
   PreviewAutomationHost,
   PreviewAutomationHostFocus,
@@ -429,6 +436,14 @@ export const WS_METHODS = {
   deviceShutdown: "device.shutdown",
   deviceDetail: "device.detail",
   deviceAction: "device.action",
+
+  // Sandbox methods
+  sandboxList: "sandbox.list",
+  sandboxCreate: "sandbox.create",
+  sandboxStart: "sandbox.start",
+  sandboxStop: "sandbox.stop",
+  sandboxRemove: "sandbox.remove",
+  sandboxPair: "sandbox.pair",
 
   // Server meta
   serverProbe: "server.probe",
@@ -1442,6 +1457,41 @@ const WsSubscribeDiscoveredLocalServersRpc = Rpc.make(WS_METHODS.subscribeDiscov
   stream: true,
 });
 
+const WsSandboxListRpc = Rpc.make(WS_METHODS.sandboxList, {
+  payload: Schema.Struct({}),
+  success: Schema.Array(SandboxSummary),
+  error: Schema.Union([SandboxError, EnvironmentAuthorizationError]),
+});
+
+const WsSandboxCreateRpc = Rpc.make(WS_METHODS.sandboxCreate, {
+  payload: SandboxCreateInput,
+  success: SandboxSummary,
+  error: Schema.Union([SandboxError, EnvironmentAuthorizationError]),
+});
+
+const WsSandboxStartRpc = Rpc.make(WS_METHODS.sandboxStart, {
+  payload: SandboxIdInput,
+  success: SandboxSummary,
+  error: Schema.Union([SandboxError, EnvironmentAuthorizationError]),
+});
+
+const WsSandboxStopRpc = Rpc.make(WS_METHODS.sandboxStop, {
+  payload: SandboxIdInput,
+  success: SandboxSummary,
+  error: Schema.Union([SandboxError, EnvironmentAuthorizationError]),
+});
+
+const WsSandboxRemoveRpc = Rpc.make(WS_METHODS.sandboxRemove, {
+  payload: SandboxIdInput,
+  error: Schema.Union([SandboxError, EnvironmentAuthorizationError]),
+});
+
+const WsSandboxPairRpc = Rpc.make(WS_METHODS.sandboxPair, {
+  payload: SandboxIdInput,
+  success: SandboxPairing,
+  error: Schema.Union([SandboxError, EnvironmentAuthorizationError]),
+});
+
 const WsDeviceTestHostRpc = Rpc.make(WS_METHODS.deviceTestHost, {
   payload: SshDeviceHostConfig,
   success: DeviceHostSummary,
@@ -1857,6 +1907,12 @@ export const WsRpcGroup = RpcGroup.make(
   WsDeviceDetailRpc,
   WsDeviceActionRpc,
   WsSubscribeDeviceStateRpc,
+  WsSandboxListRpc,
+  WsSandboxCreateRpc,
+  WsSandboxStartRpc,
+  WsSandboxStopRpc,
+  WsSandboxRemoveRpc,
+  WsSandboxPairRpc,
   WsSubscribeServerConfigRpc,
   WsSubscribeServerLifecycleRpc,
   WsSubscribeAuthAccessRpc,
