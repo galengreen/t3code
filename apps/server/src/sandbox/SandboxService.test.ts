@@ -92,7 +92,13 @@ const fakeDocker = () => {
 
 const serviceLayer = (docker: ReturnType<typeof fakeDocker>, enableSandboxes = true) =>
   SandboxService.layer.pipe(
-    Layer.provide(ServerSettings.layerTest({ enableSandboxes, sandboxImage: "sandbox:test" })),
+    Layer.provide(
+      ServerSettings.layerTest({
+        enableSandboxes,
+        sandboxImage: "sandbox:test",
+        sandboxPublishHost: "100.64.0.7",
+      }),
+    ),
     Layer.provide(
       Layer.succeed(ProcessRunner.ProcessRunner, {
         run: (input) => Effect.sync(() => docker.run(input.args)),
@@ -103,7 +109,7 @@ const serviceLayer = (docker: ReturnType<typeof fakeDocker>, enableSandboxes = t
         HttpClient.HttpClient,
         HttpClient.make((request) =>
           Effect.succeed(
-            HttpClientResponse.fromWeb(request, Response.json({ environmentId: "x" })),
+            HttpClientResponse.fromWeb(request, Response.json({ environmentId: "env-sandbox" })),
           ),
         ),
       ),
@@ -124,14 +130,15 @@ describe("SandboxService", () => {
         label: "Fix login",
         image: "sandbox:test",
         state: "running",
-        httpBaseUrl: "http://127.0.0.1:49999",
+        httpBaseUrl: "http://100.64.0.7:49999",
+        environmentId: "env-sandbox",
       });
       expect(created.id).toMatch(/^[0-9a-f]{12}$/);
       const run = docker.calls.find((args) => args[0] === "run")!;
       expect(run).toEqual(
         expect.arrayContaining([
           "--publish",
-          "127.0.0.1::7777/tcp",
+          "100.64.0.7::7777/tcp",
           "--env",
           "REPO_URL=https://github.com/example/app.git",
           `t3code.sandbox.id=${created.id}`,
@@ -149,12 +156,12 @@ describe("SandboxService", () => {
       const sandboxes = yield* SandboxService.SandboxService;
       const { id } = yield* sandboxes.create({});
       const stopped = yield* sandboxes.stop({ id });
-      expect(stopped).toMatchObject({ state: "stopped", httpBaseUrl: null });
+      expect(stopped).toMatchObject({ state: "stopped", httpBaseUrl: null, environmentId: null });
       const paired = yield* sandboxes.pair({ id }).pipe(Effect.flip);
       expect(paired._tag).toBe("SandboxNotRunningError");
       expect((yield* sandboxes.start({ id })).state).toBe("running");
       expect(yield* sandboxes.pair({ id })).toEqual({
-        httpBaseUrl: "http://127.0.0.1:49999",
+        httpBaseUrl: "http://100.64.0.7:49999",
         credential: "PAIR1234",
         expiresAt: "2026-10-03T01:00:00Z",
       });

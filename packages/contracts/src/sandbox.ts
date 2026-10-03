@@ -11,7 +11,7 @@
  */
 import { Schema } from "effect";
 
-import { TrimmedNonEmptyString } from "./baseSchemas.ts";
+import { EnvironmentId, TrimmedNonEmptyString } from "./baseSchemas.ts";
 
 export const SandboxId = TrimmedNonEmptyString.check(Schema.isPattern(/^[a-z0-9]{8,32}$/));
 export type SandboxId = typeof SandboxId.Type;
@@ -25,8 +25,10 @@ export const SandboxSummary = Schema.Struct({
   image: Schema.String,
   state: SandboxState,
   createdAt: Schema.String,
-  /** The sandbox server's origin on the host's loopback, while running. */
+  /** The sandbox server's origin at the host's publish address, while running. */
   httpBaseUrl: Schema.NullOr(Schema.String),
+  /** The sandbox server's environment, once it answers. Stable across restarts. */
+  environmentId: Schema.NullOr(EnvironmentId),
 });
 export type SandboxSummary = typeof SandboxSummary.Type;
 

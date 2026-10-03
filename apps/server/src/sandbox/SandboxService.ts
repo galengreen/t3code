@@ -5,8 +5,8 @@
  * Docker is the record. Every sandbox container carries `t3code.sandbox.*`
  * labels, and listing reads them back with `docker inspect`, so nothing here is
  * persisted and a sandbox removed by hand simply disappears. The sandbox's T3
- * port is published on the host's loopback only; reaching it from other
- * devices goes through the host.
+ * port is published on `sandboxPublishHost` (loopback by default), and
+ * clients connect to it there directly.
  *
  * The configured image must start a T3 server on port 7777 and put `t3` on
  * PATH, which pairing uses to mint a credential inside the sandbox. Docker
@@ -18,6 +18,7 @@ import {
   SandboxNotRunningError,
   SandboxOperationError,
   SandboxUnavailableError,
+  EnvironmentId,
   type SandboxCreateInput,
   type SandboxError,
   type SandboxId,
@@ -80,8 +81,17 @@ const sandboxState = (status: string): SandboxState =>
       ? "failed"
       : "stopped";
 
+const EnvironmentDescriptor = Schema.Struct({ environmentId: EnvironmentId });
+const decodeDescriptor = Schema.decodeUnknownEffect(EnvironmentDescriptor);
+
+/** URL host form of an address: IPv6 literals need brackets. */
+const urlHost = (address: string) => (address.includes(":") ? `[${address}]` : address);
+
 /** A container's labels and state as a sandbox; null for unlabelled containers. */
-const toSummary = (container: typeof DockerContainer.Type): SandboxSummary | null => {
+const toSummary = (
+  container: typeof DockerContainer.Type,
+  publishHost: string,
+): SandboxSummary | null => {
   const labels = container.Config.Labels ?? {};
   const id = labels[SANDBOX_ID_LABEL];
   if (labels[SANDBOX_LABEL] !== "1" || id === undefined) return null;
@@ -93,7 +103,8 @@ const toSummary = (container: typeof DockerContainer.Type): SandboxSummary | nul
     image: container.Config.Image,
     state,
     createdAt: container.Created,
-    httpBaseUrl: state === "running" && port ? `http://127.0.0.1:${port}` : null,
+    httpBaseUrl: state === "running" && port ? `http://${urlHost(publishHost)}:${port}` : null,
+    environmentId: null,
   };
 };
 
@@ -121,7 +132,7 @@ const make = Effect.gen(function* () {
   const httpClient = yield* HttpClient.HttpClient;
   const crypto = yield* Crypto.Crypto;
 
-  /** The configured image, once sandboxes are switched on. */
+  /** Image and publish address, once sandboxes are switched on. */
   const ensureAvailable = Effect.gen(function* () {
     const current = yield* settings.getSettings.pipe(
       Effect.mapError(() => new SandboxUnavailableError({ reason: "Settings could not be read." })),
@@ -131,8 +142,20 @@ const make = Effect.gen(function* () {
         reason: "Sandboxes are turned off for this server.",
       });
     }
-    return current.sandboxImage;
+    return { image: current.sandboxImage, publishHost: current.sandboxPublishHost };
   });
+
+  /** The environment a running sandbox serves; null while it is still booting. */
+  const environmentIdOf = (summary: SandboxSummary) =>
+    summary.httpBaseUrl === null
+      ? Effect.succeed(summary)
+      : httpClient.get(`${summary.httpBaseUrl}/.well-known/t3/environment`).pipe(
+          Effect.flatMap((response) => response.json),
+          Effect.flatMap(decodeDescriptor),
+          Effect.timeout("2 seconds"),
+          Effect.map(({ environmentId }) => ({ ...summary, environmentId })),
+          Effect.orElseSucceed(() => summary),
+        );
 
   const docker = (args: ReadonlyArray<string>, operation: Operation, id?: SandboxId) =>
     runner.run({ command: "docker", args, timeout: "5 minutes" }).pipe(
@@ -151,17 +174,20 @@ const make = Effect.gen(function* () {
   const inspect = (ids: ReadonlyArray<string>, operation: Operation, id?: SandboxId) =>
     ids.length === 0
       ? Effect.succeed<ReadonlyArray<SandboxSummary>>([])
-      : docker(["inspect", ...ids], operation, id).pipe(
-          Effect.flatMap((stdout) =>
+      : Effect.all([docker(["inspect", ...ids], operation, id), ensureAvailable]).pipe(
+          Effect.flatMap(([stdout, { publishHost }]) =>
             decodeInspect(stdout).pipe(
               Effect.mapError((cause) => new SandboxOperationError({ operation, id, cause })),
+              Effect.map((containers) =>
+                containers.flatMap((container) => {
+                  const summary = toSummary(container, publishHost);
+                  return summary ? [summary] : [];
+                }),
+              ),
             ),
           ),
-          Effect.map((containers) =>
-            containers.flatMap((container) => {
-              const summary = toSummary(container);
-              return summary ? [summary] : [];
-            }),
+          Effect.flatMap((summaries) =>
+            Effect.forEach(summaries, environmentIdOf, { concurrency: "unbounded" }),
           ),
         );
 
@@ -204,7 +230,7 @@ const make = Effect.gen(function* () {
 
   const create: SandboxService["Service"]["create"] = Effect.fn("SandboxService.create")(
     function* (input) {
-      const image = yield* ensureAvailable;
+      const { image, publishHost } = yield* ensureAvailable;
       const uuid = yield* crypto.randomUUIDv4.pipe(
         Effect.mapError((cause) => new SandboxOperationError({ operation: "create", cause })),
       );
@@ -225,9 +251,9 @@ const make = Effect.gen(function* () {
           containerName(id),
           "--volume",
           `${volumeName(id)}:/home/dev`,
-          // Loopback only: other devices reach a sandbox through the host.
+          // Only on the configured address; loopback unless set otherwise.
           "--publish",
-          `127.0.0.1::${SANDBOX_PORT}`,
+          `${urlHost(publishHost)}::${SANDBOX_PORT}`,
           "--env",
           "T3_HOST=0.0.0.0",
           // The image writes this to /etc/machine-info, which the sandbox's
@@ -240,7 +266,8 @@ const make = Effect.gen(function* () {
         "create",
         id,
       );
-      return yield* waitUntilReady(yield* find(id, "create"), "create");
+      yield* waitUntilReady(yield* find(id, "create"), "create");
+      return yield* find(id, "create");
     },
   );
 
@@ -250,7 +277,8 @@ const make = Effect.gen(function* () {
     yield* ensureAvailable;
     yield* find(id, "start");
     yield* docker(["start", containerName(id)], "start", id);
-    return yield* waitUntilReady(yield* find(id, "start"), "start");
+    yield* waitUntilReady(yield* find(id, "start"), "start");
+    return yield* find(id, "start");
   });
 
   const stop: SandboxService["Service"]["stop"] = Effect.fn("SandboxService.stop")(function* ({

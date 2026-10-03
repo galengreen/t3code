@@ -1278,6 +1278,14 @@ export const ServerSettings = Schema.Struct({
   sandboxImage: TrimmedNonEmptyString.pipe(
     Schema.withDecodingDefault(Effect.succeed("t3code-sandbox:latest")),
   ),
+  /**
+   * Host address sandboxes publish their servers on, which clients connect to
+   * directly. Loopback serves clients on this machine only; a LAN or tailnet
+   * address serves other devices on that network.
+   */
+  sandboxPublishHost: TrimmedNonEmptyString.pipe(
+    Schema.withDecodingDefault(Effect.succeed("127.0.0.1")),
+  ),
   sidebarAutoSettleAfterDays: Schema.NullOr(SidebarAutoSettleAfterDays).pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_SIDEBAR_AUTO_SETTLE_AFTER_DAYS)),
   ),
@@ -1641,6 +1649,7 @@ export const ServerSettingsPatch = Schema.Struct({
   enableDeviceSupport: Schema.optionalKey(Schema.Boolean),
   enableSandboxes: Schema.optionalKey(Schema.Boolean),
   sandboxImage: Schema.optionalKey(TrimmedNonEmptyString),
+  sandboxPublishHost: Schema.optionalKey(TrimmedNonEmptyString),
   deviceOnboardingCompleted: Schema.optionalKey(Schema.Boolean),
   deviceHosts: Schema.optionalKey(SshDeviceHostConfigs),
   sidebarAutoSettleAfterDays: Schema.optionalKey(Schema.NullOr(SidebarAutoSettleAfterDays)),
