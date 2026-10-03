@@ -262,6 +262,8 @@ import {
 import {
   SandboxCreateInput,
   SandboxError,
+  SandboxFlyAccount,
+  SandboxFlyAccountInput,
   SandboxIdInput,
   SandboxPairing,
   SandboxSummary,
@@ -444,6 +446,7 @@ export const WS_METHODS = {
   sandboxStop: "sandbox.stop",
   sandboxRemove: "sandbox.remove",
   sandboxPair: "sandbox.pair",
+  sandboxFlyAccount: "sandbox.flyAccount",
 
   // Server meta
   serverProbe: "server.probe",
@@ -1492,6 +1495,12 @@ const WsSandboxPairRpc = Rpc.make(WS_METHODS.sandboxPair, {
   error: Schema.Union([SandboxError, EnvironmentAuthorizationError]),
 });
 
+const WsSandboxFlyAccountRpc = Rpc.make(WS_METHODS.sandboxFlyAccount, {
+  payload: SandboxFlyAccountInput,
+  success: SandboxFlyAccount,
+  error: Schema.Union([SandboxError, EnvironmentAuthorizationError]),
+});
+
 const WsDeviceTestHostRpc = Rpc.make(WS_METHODS.deviceTestHost, {
   payload: SshDeviceHostConfig,
   success: DeviceHostSummary,
@@ -1912,6 +1921,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsSandboxStartRpc,
   WsSandboxStopRpc,
   WsSandboxRemoveRpc,
+  WsSandboxFlyAccountRpc,
   WsSandboxPairRpc,
   WsSubscribeServerConfigRpc,
   WsSubscribeServerLifecycleRpc,

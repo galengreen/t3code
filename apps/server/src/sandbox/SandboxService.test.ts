@@ -6,7 +6,7 @@ import { HttpClient, HttpClientResponse } from "effect/unstable/http";
 
 import * as ProcessRunner from "../processRunner.ts";
 import * as ServerSettings from "../serverSettings.ts";
-import * as DockerSandboxDriver from "./DockerSandboxDriver.ts";
+import * as SandboxDrivers from "./SandboxDrivers.ts";
 import * as SandboxService from "./SandboxService.ts";
 
 interface FakeContainer {
@@ -95,8 +95,8 @@ const fakeDocker = () => {
 
 const serviceLayer = (docker: ReturnType<typeof fakeDocker>, enableSandboxes = true) =>
   SandboxService.layer.pipe(
-    Layer.provide(DockerSandboxDriver.layer),
-    Layer.provide(
+    Layer.provide(SandboxDrivers.layer),
+    Layer.provideMerge(
       ServerSettings.layerTest({
         enableSandboxes,
         sandboxImage: "sandbox:test",
@@ -199,6 +199,24 @@ describe("SandboxService", () => {
       yield* sandboxes.remove({ id });
       expect(yield* sandboxes.list).toEqual([]);
       expect(docker.volumes.size).toBe(0);
+    }).pipe(Effect.provide(serviceLayer(docker)));
+  });
+
+  it.effect("keeps managing Docker sandboxes after new ones move to Fly", () => {
+    const docker = fakeDocker();
+    return Effect.gen(function* () {
+      const sandboxes = yield* SandboxService.SandboxService;
+      const settings = yield* ServerSettings.ServerSettingsService;
+      const { id } = yield* sandboxes.create({});
+      yield* settings.updateSettings({ sandboxBackend: "fly" });
+      expect((yield* sandboxes.list).map((sandbox) => [sandbox.id, sandbox.backend])).toEqual([
+        [id, "docker"],
+      ]);
+      // Fly is selected but has no token yet, so new sandboxes cannot go anywhere.
+      const error = yield* sandboxes.create({}).pipe(Effect.flip);
+      expect(error._tag).toBe("SandboxUnavailableError");
+      yield* sandboxes.remove({ id });
+      expect(yield* sandboxes.list).toEqual([]);
     }).pipe(Effect.provide(serviceLayer(docker)));
   });
 

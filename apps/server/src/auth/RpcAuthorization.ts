@@ -206,6 +206,7 @@ export const RPC_REQUIRED_SCOPES = {
   [WS_METHODS.sandboxStop]: AuthOrchestrationOperateScope,
   [WS_METHODS.sandboxRemove]: AuthOrchestrationOperateScope,
   [WS_METHODS.sandboxPair]: AuthOrchestrationOperateScope,
+  [WS_METHODS.sandboxFlyAccount]: AuthOrchestrationOperateScope,
   [WS_METHODS.subscribeServerConfig]: AuthOrchestrationReadScope,
   [WS_METHODS.subscribeServerLifecycle]: AuthOrchestrationReadScope,
   [WS_METHODS.subscribeAuthAccess]: AuthAccessReadScope,

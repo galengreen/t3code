@@ -2,8 +2,8 @@
  * Sandbox - Schemas for isolated environments that a host environment creates
  * on demand, one per task.
  *
- * A sandbox is a container running its own T3 server, so it is a complete
- * environment once a client pairs with it. The host only creates, starts,
+ * A sandbox is a machine (a Docker container or a cloud VM) running its own
+ * T3 server, so it is a complete environment once a client pairs with it. The host only creates, starts,
  * stops, and removes sandboxes and mints pairing credentials for them; it
  * never runs work inside one.
  *
@@ -21,6 +21,8 @@ export type SandboxState = typeof SandboxState.Type;
 
 export const SandboxSummary = Schema.Struct({
   id: SandboxId,
+  /** Where it runs, which may differ from where new sandboxes go now. */
+  backend: Schema.Literals(["docker", "fly"]),
   label: Schema.String,
   image: Schema.String,
   state: SandboxState,
@@ -50,6 +52,21 @@ export const SandboxPairing = Schema.Struct({
   expiresAt: Schema.String,
 });
 export type SandboxPairing = typeof SandboxPairing.Type;
+
+export const SandboxFlyAccountInput = Schema.Struct({
+  /** Checks this token instead of the saved one, before it is saved. */
+  apiToken: Schema.optional(TrimmedNonEmptyString),
+});
+export type SandboxFlyAccountInput = typeof SandboxFlyAccountInput.Type;
+
+/** What a Fly token can reach, for choosing where sandboxes go. */
+export const SandboxFlyAccount = Schema.Struct({
+  organizations: Schema.Array(Schema.Struct({ slug: Schema.String, name: Schema.String })),
+  regions: Schema.Array(Schema.Struct({ code: Schema.String, name: Schema.String })),
+  /** Fly's guess at the region closest to this server. */
+  nearestRegion: Schema.NullOr(Schema.String),
+});
+export type SandboxFlyAccount = typeof SandboxFlyAccount.Type;
 
 export class SandboxUnavailableError extends Schema.TaggedError<SandboxUnavailableError>()(
   "SandboxUnavailableError",
@@ -81,7 +98,7 @@ export class SandboxNotRunningError extends Schema.TaggedError<SandboxNotRunning
 export class SandboxOperationError extends Schema.TaggedError<SandboxOperationError>()(
   "SandboxOperationError",
   {
-    operation: Schema.Literals(["list", "create", "start", "stop", "remove", "pair"]),
+    operation: Schema.Literals(["list", "create", "start", "stop", "remove", "pair", "account"]),
     id: Schema.optional(Schema.String),
     cause: Schema.optional(Schema.Defect()),
   },

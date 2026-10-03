@@ -997,6 +997,26 @@ export const BitbucketSettings = Schema.Struct({
 });
 export type BitbucketSettings = typeof BitbucketSettings.Type;
 
+/** Where new sandboxes run: this machine's Docker, or Fly Machines. */
+export const SandboxBackend = Schema.Literals(["docker", "fly"]);
+export type SandboxBackend = typeof SandboxBackend.Type;
+
+/**
+ * How much machine a new sandbox gets. Small is 2 shared vCPUs and 2 GB;
+ * medium is 4 shared vCPUs and 8 GB; large is 4 dedicated vCPUs and 8 GB
+ * where the backend has dedicated CPUs (Docker treats it as 8 CPUs, 16 GB).
+ */
+export const SandboxSize = Schema.Literals(["small", "medium", "large"]);
+export type SandboxSize = typeof SandboxSize.Type;
+
+export const SandboxFlySettings = Schema.Struct({
+  /** Kept in the secret store; clients only learn whether one is set. */
+  apiToken: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
+  organization: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
+  region: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
+});
+export type SandboxFlySettings = typeof SandboxFlySettings.Type;
+
 export const ObservabilitySettings = Schema.Struct({
   otlpTracesUrl: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
   otlpMetricsUrl: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
@@ -1271,11 +1291,14 @@ export const ServerSettings = Schema.Struct({
   deviceOnboardingCompleted: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   deviceHosts: SshDeviceHostConfigs.pipe(Schema.withDecodingDefault(Effect.succeed([]))),
   /**
-   * Whether this server may create sandboxes with Docker. Off by default:
-   * access to the Docker daemon is effectively root on the host.
+   * Whether this server may create sandboxes. Off by default: with the Docker
+   * backend, access to the Docker daemon is effectively root on the host.
    */
   enableSandboxes: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
-  /** Image each new sandbox runs; it must start a T3 server on port 7777. */
+  /**
+   * Image each new sandbox runs; it must start a T3 server on port 7777. Fly
+   * pulls it, so there it must be a registry reference.
+   */
   sandboxImage: TrimmedNonEmptyString.pipe(
     Schema.withDecodingDefault(Effect.succeed("t3code-sandbox:latest")),
   ),
@@ -1295,6 +1318,9 @@ export const ServerSettings = Schema.Struct({
   sandboxEnvironment: ProviderInstanceEnvironment.pipe(
     Schema.withDecodingDefault(Effect.succeed([])),
   ),
+  sandboxBackend: SandboxBackend.pipe(Schema.withDecodingDefault(Effect.succeed("docker"))),
+  sandboxSize: SandboxSize.pipe(Schema.withDecodingDefault(Effect.succeed("small"))),
+  sandboxFly: SandboxFlySettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
   sidebarAutoSettleAfterDays: Schema.NullOr(SidebarAutoSettleAfterDays).pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_SIDEBAR_AUTO_SETTLE_AFTER_DAYS)),
   ),
@@ -1660,6 +1686,15 @@ export const ServerSettingsPatch = Schema.Struct({
   sandboxImage: Schema.optionalKey(TrimmedNonEmptyString),
   sandboxPublishHost: Schema.optionalKey(TrimmedNonEmptyString),
   sandboxEnvironment: Schema.optionalKey(ProviderInstanceEnvironment),
+  sandboxBackend: Schema.optionalKey(SandboxBackend),
+  sandboxSize: Schema.optionalKey(SandboxSize),
+  sandboxFly: Schema.optionalKey(
+    Schema.Struct({
+      apiToken: Schema.optionalKey(TrimmedString),
+      organization: Schema.optionalKey(TrimmedString),
+      region: Schema.optionalKey(TrimmedString),
+    }),
+  ),
   deviceOnboardingCompleted: Schema.optionalKey(Schema.Boolean),
   deviceHosts: Schema.optionalKey(SshDeviceHostConfigs),
   sidebarAutoSettleAfterDays: Schema.optionalKey(Schema.NullOr(SidebarAutoSettleAfterDays)),

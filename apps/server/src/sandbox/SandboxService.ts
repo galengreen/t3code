@@ -1,8 +1,9 @@
 /**
  * Creates and manages sandboxes: machines that each run their own T3 server,
  * so a paired client sees a complete, isolated environment. Where the machines
- * run is the `SandboxDriver`'s concern; this service owns what is the same
- * everywhere.
+ * run is a `SandboxDriver`'s concern; this service owns what is the same
+ * everywhere. New sandboxes go to the `sandboxBackend` setting's driver, and
+ * each existing one is managed by whichever driver knows it.
  *
  * The configured image must start a T3 server on port 7777 and put `t3` on
  * PATH, which pairing uses to mint a credential inside the sandbox. It reads
@@ -11,12 +12,17 @@
  * variables, such as an agent login token.
  */
 import {
+  SandboxNotFoundError,
   SandboxNotRunningError,
   SandboxOperationError,
   SandboxUnavailableError,
   EnvironmentId,
+  type SandboxBackend,
   type SandboxCreateInput,
   type SandboxError,
+  type SandboxFlyAccount,
+  type SandboxFlyAccountInput,
+  type SandboxId,
   type SandboxIdInput,
   type SandboxPairing,
   type SandboxSummary,
@@ -30,7 +36,8 @@ import * as Schema from "effect/Schema";
 import { HttpClient } from "effect/unstable/http";
 
 import * as ServerSettings from "../serverSettings.ts";
-import { SandboxDriver, type SandboxMachine, type SandboxOperation } from "./SandboxDriver.ts";
+import { SandboxDrivers, type SandboxMachine, type SandboxOperation } from "./SandboxDriver.ts";
+import { flyAccount } from "./FlySandboxDriver.ts";
 
 /** First start clones the repository and boots a server, so it gets a while. */
 const READY_TIMEOUT_MS = 180_000;
@@ -55,20 +62,28 @@ export class SandboxService extends Context.Service<
     readonly remove: (input: SandboxIdInput) => Effect.Effect<void, SandboxError>;
     /** Mints a one-time pairing credential inside a running sandbox. */
     readonly pair: (input: SandboxIdInput) => Effect.Effect<SandboxPairing, SandboxError>;
+    /** What a Fly token (the given one, else the saved one) can reach. */
+    readonly flyAccount: (
+      input: SandboxFlyAccountInput,
+    ) => Effect.Effect<SandboxFlyAccount, SandboxError>;
   }
 >()("t3/sandbox/SandboxService") {}
 
+const BACKENDS: ReadonlyArray<SandboxBackend> = ["docker", "fly"];
+
 const make = Effect.gen(function* () {
   const settings = yield* ServerSettings.ServerSettingsService;
-  const driver = yield* SandboxDriver;
+  const drivers = yield* SandboxDrivers;
   const httpClient = yield* HttpClient.HttpClient;
   const crypto = yield* Crypto.Crypto;
 
+  const readSettings = settings.getSettings.pipe(
+    Effect.mapError(() => new SandboxUnavailableError({ reason: "Settings could not be read." })),
+  );
+
   /** Current settings, once sandboxes are switched on. */
   const ensureAvailable = Effect.gen(function* () {
-    const current = yield* settings.getSettings.pipe(
-      Effect.mapError(() => new SandboxUnavailableError({ reason: "Settings could not be read." })),
-    );
+    const current = yield* readSettings;
     if (!current.enableSandboxes) {
       return yield* new SandboxUnavailableError({
         reason: "Sandboxes are turned off for this server.",
@@ -77,16 +92,44 @@ const make = Effect.gen(function* () {
     return current;
   });
 
+  /** The selected backend first; another backend's failures only mean it has no such sandbox. */
+  const ordered = (selected: SandboxBackend) => [
+    selected,
+    ...BACKENDS.filter((backend) => backend !== selected),
+  ];
+
+  /** Which backend holds a sandbox, and the sandbox as it is now. */
+  const locate = Effect.fn("SandboxService.locate")(function* (
+    id: SandboxId,
+    operation: SandboxOperation,
+  ) {
+    const { sandboxBackend } = yield* ensureAvailable;
+    for (const backend of ordered(sandboxBackend)) {
+      const found = yield* drivers[backend].find(id, operation).pipe(
+        Effect.map((machine) => ({ backend, machine })),
+        Effect.catchIf(
+          (error) => error._tag === "SandboxNotFoundError" || backend !== sandboxBackend,
+          () => Effect.succeed(null),
+        ),
+      );
+      if (found) return found;
+    }
+    return yield* new SandboxNotFoundError({ id });
+  });
+
   /** A machine with the environment it serves; null while it is still booting. */
-  const summarize = (machine: SandboxMachine): Effect.Effect<SandboxSummary> =>
+  const summarize = (
+    backend: SandboxBackend,
+    machine: SandboxMachine,
+  ): Effect.Effect<SandboxSummary> =>
     machine.httpBaseUrl === null
-      ? Effect.succeed({ ...machine, environmentId: null })
+      ? Effect.succeed({ ...machine, backend, environmentId: null })
       : httpClient.get(`${machine.httpBaseUrl}/.well-known/t3/environment`).pipe(
           Effect.flatMap((response) => response.json),
           Effect.flatMap(decodeDescriptor),
-          Effect.timeout("2 seconds"),
-          Effect.map(({ environmentId }) => ({ ...machine, environmentId })),
-          Effect.orElseSucceed(() => ({ ...machine, environmentId: null })),
+          Effect.timeout("5 seconds"),
+          Effect.map(({ environmentId }) => ({ ...machine, backend, environmentId })),
+          Effect.orElseSucceed(() => ({ ...machine, backend, environmentId: null })),
         );
 
   const waitUntilReady = (machine: SandboxMachine, operation: SandboxOperation) =>
@@ -108,18 +151,30 @@ const make = Effect.gen(function* () {
         }).pipe(Effect.provideService(HttpClient.HttpClient, httpClient));
 
   /** Waits for a just-started sandbox's server, then reports it. */
-  const ready = (id: SandboxMachine["id"], operation: SandboxOperation) =>
-    driver.find(id, operation).pipe(
+  const ready = (backend: SandboxBackend, id: SandboxId, operation: SandboxOperation) =>
+    drivers[backend].find(id, operation).pipe(
       Effect.tap((machine) => waitUntilReady(machine, operation)),
-      Effect.flatMap(() => driver.find(id, operation)),
-      Effect.flatMap(summarize),
+      Effect.flatMap(() => drivers[backend].find(id, operation)),
+      Effect.flatMap((machine) => summarize(backend, machine)),
     );
 
-  const list: SandboxService["Service"]["list"] = ensureAvailable.pipe(
-    Effect.andThen(driver.list),
-    Effect.flatMap((machines) => Effect.forEach(machines, summarize, { concurrency: "unbounded" })),
-    Effect.withSpan("SandboxService.list"),
-  );
+  const list: SandboxService["Service"]["list"] = Effect.gen(function* () {
+    const { sandboxBackend } = yield* ensureAvailable;
+    const machines = yield* Effect.forEach(
+      BACKENDS,
+      (backend) =>
+        drivers[backend].list.pipe(
+          backend === sandboxBackend ? (listed) => listed : Effect.orElseSucceed(() => []),
+          Effect.map((listed) => listed.map((machine) => ({ backend, machine }))),
+        ),
+      { concurrency: "unbounded" },
+    );
+    return yield* Effect.forEach(
+      machines.flat(),
+      ({ backend, machine }) => summarize(backend, machine),
+      { concurrency: "unbounded" },
+    );
+  }).pipe(Effect.withSpan("SandboxService.list"));
 
   const create: SandboxService["Service"]["create"] = Effect.fn("SandboxService.create")(
     function* (input) {
@@ -129,10 +184,12 @@ const make = Effect.gen(function* () {
       );
       const id = uuid.replaceAll("-", "").slice(0, 12);
       const label = input.label ?? id;
-      yield* driver.create({
+      const backend = current.sandboxBackend;
+      yield* drivers[backend].create({
         id,
         label,
         image: current.sandboxImage,
+        size: current.sandboxSize,
         // The image's own variables come last so the host's list cannot replace them.
         environment: [
           ...current.sandboxEnvironment,
@@ -143,43 +200,39 @@ const make = Effect.gen(function* () {
             : []),
         ],
       });
-      return yield* ready(id, "create");
+      return yield* ready(backend, id, "create");
     },
   );
 
   const start: SandboxService["Service"]["start"] = Effect.fn("SandboxService.start")(function* ({
     id,
   }) {
-    yield* ensureAvailable;
-    yield* driver.find(id, "start");
-    yield* driver.start(id);
-    return yield* ready(id, "start");
+    const { backend } = yield* locate(id, "start");
+    yield* drivers[backend].start(id);
+    return yield* ready(backend, id, "start");
   });
 
   const stop: SandboxService["Service"]["stop"] = Effect.fn("SandboxService.stop")(function* ({
     id,
   }) {
-    yield* ensureAvailable;
-    yield* driver.find(id, "stop");
-    yield* driver.stop(id);
-    return yield* summarize(yield* driver.find(id, "stop"));
+    const { backend } = yield* locate(id, "stop");
+    yield* drivers[backend].stop(id);
+    return yield* summarize(backend, yield* drivers[backend].find(id, "stop"));
   });
 
   const remove: SandboxService["Service"]["remove"] = Effect.fn("SandboxService.remove")(
     function* ({ id }) {
-      yield* ensureAvailable;
-      yield* driver.find(id, "remove");
-      yield* driver.remove(id);
+      const { backend } = yield* locate(id, "remove");
+      yield* drivers[backend].remove(id);
     },
   );
 
   const pair: SandboxService["Service"]["pair"] = Effect.fn("SandboxService.pair")(function* ({
     id,
   }) {
-    yield* ensureAvailable;
-    const machine = yield* driver.find(id, "pair");
+    const { backend, machine } = yield* locate(id, "pair");
     if (machine.httpBaseUrl === null) return yield* new SandboxNotRunningError({ id });
-    const stdout = yield* driver.exec(
+    const stdout = yield* drivers[backend].exec(
       id,
       [
         "t3",
@@ -200,7 +253,15 @@ const make = Effect.gen(function* () {
     return { httpBaseUrl: machine.httpBaseUrl, ...pairing };
   });
 
-  return SandboxService.of({ list, create, start, stop, remove, pair });
+  const flyAccountOf: SandboxService["Service"]["flyAccount"] = Effect.fn(
+    "SandboxService.flyAccount",
+  )(function* (input) {
+    const token = input.apiToken ?? (yield* readSettings).sandboxFly.apiToken;
+    if (!token) return yield* new SandboxUnavailableError({ reason: "Add a Fly API token first." });
+    return yield* flyAccount(token).pipe(Effect.provideService(HttpClient.HttpClient, httpClient));
+  });
+
+  return SandboxService.of({ list, create, start, stop, remove, pair, flyAccount: flyAccountOf });
 });
 
 export const layer = Layer.effect(SandboxService, make);

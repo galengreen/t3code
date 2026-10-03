@@ -18,25 +18,32 @@ import {
   SandboxOperationError,
   SandboxUnavailableError,
   type SandboxId,
+  type SandboxSize,
   type SandboxState,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
-import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 
 import * as ProcessRunner from "../processRunner.ts";
 import * as ServerSettings from "../serverSettings.ts";
-import {
+import type {
   SandboxDriver,
-  type SandboxMachine,
-  type SandboxOperation,
-  type SandboxVariable,
+  SandboxMachine,
+  SandboxOperation,
+  SandboxVariable,
 } from "./SandboxDriver.ts";
 
 const SANDBOX_LABEL = "t3code.sandbox";
 const SANDBOX_ID_LABEL = "t3code.sandbox.id";
 const SANDBOX_NAME_LABEL = "t3code.sandbox.label";
 const SANDBOX_PORT = "7777/tcp";
+
+/** Docker has no dedicated CPUs, so large gets more of them instead. */
+const SIZE_LIMITS: Record<SandboxSize, { readonly cpus: string; readonly memory: string }> = {
+  small: { cpus: "2", memory: "2g" },
+  medium: { cpus: "4", memory: "8g" },
+  large: { cpus: "8", memory: "16g" },
+};
 
 const containerName = (id: SandboxId) => `t3-sandbox-${id}`;
 const volumeName = (id: SandboxId) => `t3-sandbox-${id}-home`;
@@ -108,7 +115,7 @@ const environmentArgs = (environment: ReadonlyArray<SandboxVariable>) => {
   return { args, secrets };
 };
 
-const make = Effect.gen(function* () {
+export const make = Effect.gen(function* () {
   const settings = yield* ServerSettings.ServerSettingsService;
   const runner = yield* ProcessRunner.ProcessRunner;
 
@@ -153,17 +160,17 @@ const make = Effect.gen(function* () {
       return containers.flatMap((container) => toMachine(container, host) ?? []);
     });
 
-  const find: SandboxDriver["Service"]["find"] = (id, operation) =>
+  const find: SandboxDriver["find"] = (id, operation) =>
     inspect(`${SANDBOX_ID_LABEL}=${id}`, operation, id).pipe(
       Effect.flatMap(([machine]) =>
         machine ? Effect.succeed(machine) : Effect.fail(new SandboxNotFoundError({ id })),
       ),
     );
 
-  return SandboxDriver.of({
+  return {
     list: inspect(`${SANDBOX_LABEL}=1`, "list"),
     find,
-    create: ({ id, label, image, environment }) =>
+    create: ({ id, label, image, size, environment }) =>
       Effect.gen(function* () {
         const host = yield* publishHost;
         const env = environmentArgs(environment);
@@ -181,6 +188,10 @@ const make = Effect.gen(function* () {
             `${SANDBOX_NAME_LABEL}=${label}`,
             "--hostname",
             containerName(id),
+            "--cpus",
+            SIZE_LIMITS[size].cpus,
+            "--memory",
+            SIZE_LIMITS[size].memory,
             "--volume",
             `${volumeName(id)}:/home/dev`,
             // Only on the configured address; loopback unless set otherwise.
@@ -204,7 +215,5 @@ const make = Effect.gen(function* () {
       ),
     exec: (id, command, operation) =>
       docker(["exec", containerName(id), ...command], operation, id),
-  });
+  } satisfies SandboxDriver;
 });
-
-export const layer = Layer.effect(SandboxDriver, make);

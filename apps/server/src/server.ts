@@ -69,7 +69,7 @@ import * as PreviewAutomationBroker from "./mcp/PreviewAutomationBroker.ts";
 import * as DeviceService from "./device/DeviceService.ts";
 import { deviceHubProxyRouteLayer } from "./device/DeviceHubProxy.ts";
 import * as DesktopStreamer from "./device/DesktopStreamer.ts";
-import * as DockerSandboxDriver from "./sandbox/DockerSandboxDriver.ts";
+import * as SandboxDrivers from "./sandbox/SandboxDrivers.ts";
 import * as SandboxService from "./sandbox/SandboxService.ts";
 import * as PreviewManager from "./preview/Manager.ts";
 import * as PortScanner from "./preview/PortScanner.ts";
@@ -407,7 +407,7 @@ const PreviewLayerLive = Layer.empty.pipe(
 const DesktopStreamerLayerLive = DesktopStreamer.layer.pipe(Layer.provide(ProcessRunner.layer));
 
 const SandboxLayerLive = SandboxService.layer.pipe(
-  Layer.provide(DockerSandboxDriver.layer),
+  Layer.provide(SandboxDrivers.layer),
   Layer.provide(ServerSettingsLayerLive),
   Layer.provide(ProcessRunner.layer),
 );

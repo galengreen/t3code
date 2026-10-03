@@ -11,7 +11,7 @@ import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import * as ServerConfig from "../config.ts";
 import * as SqlitePersistence from "../persistence/Layers/Sqlite.ts";
 import * as ProcessRunner from "../processRunner.ts";
-import * as DockerSandboxDriver from "../sandbox/DockerSandboxDriver.ts";
+import * as SandboxDrivers from "../sandbox/SandboxDrivers.ts";
 import * as SandboxService from "../sandbox/SandboxService.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import { type CliAuthLocationFlags, projectLocationFlags, resolveCliAuthConfig } from "./config.ts";
@@ -33,7 +33,7 @@ const runWithSandboxes = <A, E>(
       Effect.flatMap(run),
       Effect.provide(
         SandboxService.layer.pipe(
-          Layer.provide(DockerSandboxDriver.layer),
+          Layer.provide(SandboxDrivers.layer),
           Layer.provide(
             ServerSettings.layer.pipe(
               Layer.provide(ServerSecretStore.layer),
