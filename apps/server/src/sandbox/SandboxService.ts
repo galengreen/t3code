@@ -119,21 +119,26 @@ const make = Effect.gen(function* () {
   });
 
   /**
-   * A machine with the environment it serves. Sandboxes record theirs when
-   * created; older ones are asked, so theirs is null while stopped or booting.
+   * A machine as clients see it. Its address is only given once its server
+   * answers, so nothing pairs with a sandbox that is still booting. Sandboxes
+   * record their environment when created; older ones report it when asked.
    */
   const summarize = (
     backend: SandboxBackend,
     machine: SandboxMachine,
   ): Effect.Effect<SandboxSummary> =>
-    machine.environmentId !== null || machine.httpBaseUrl === null
+    machine.httpBaseUrl === null
       ? Effect.succeed({ ...machine, backend })
       : httpClient.get(`${machine.httpBaseUrl}/.well-known/t3/environment`).pipe(
           Effect.flatMap((response) => response.json),
           Effect.flatMap(decodeDescriptor),
           Effect.timeout("5 seconds"),
-          Effect.map(({ environmentId }) => ({ ...machine, backend, environmentId })),
-          Effect.orElseSucceed(() => ({ ...machine, backend, environmentId: null })),
+          Effect.map(({ environmentId }) => ({
+            ...machine,
+            backend,
+            environmentId: machine.environmentId ?? environmentId,
+          })),
+          Effect.orElseSucceed(() => ({ ...machine, backend, httpBaseUrl: null })),
         );
 
   const waitUntilReady = (machine: SandboxMachine, operation: SandboxOperation) =>

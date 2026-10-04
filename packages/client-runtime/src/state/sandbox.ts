@@ -6,6 +6,7 @@ import {
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
+import * as PartitionedSemaphore from "effect/PartitionedSemaphore";
 import * as SubscriptionRef from "effect/SubscriptionRef";
 import type { Atom } from "effect/unstable/reactivity";
 
@@ -86,40 +87,59 @@ export function sandboxRegistrationAction(
     : { kind: "none" };
 }
 
+const registerSandboxEnvironment = Effect.fn("clientRuntime.sandbox.ensureEnvironment")(function* (
+  hostEnvironmentId: EnvironmentId,
+  sandbox: SandboxSummary,
+  target: { readonly environmentId: EnvironmentId; readonly httpBaseUrl: string },
+) {
+  const registry = yield* EnvironmentRegistry.EnvironmentRegistry;
+  const onboarding = yield* ConnectionOnboarding.ConnectionOnboarding;
+  const entry = (yield* SubscriptionRef.get(registry.entries)).get(target.environmentId);
+  const action = sandboxRegistrationAction(entry, target.httpBaseUrl);
+  if (action.kind === "register") {
+    const pairing = yield* registry.run(
+      hostEnvironmentId,
+      request(WS_METHODS.sandboxPair, { id: sandbox.id }),
+    );
+    return yield* onboarding.registerPairing({
+      host: pairing.httpBaseUrl,
+      pairingCode: pairing.credential,
+    });
+  }
+  if (action.kind === "update") {
+    yield* onboarding.updateBearer({
+      environmentId: target.environmentId,
+      label: action.label,
+      httpBaseUrl: action.httpBaseUrl,
+    });
+  }
+  return target.environmentId;
+});
+
+/**
+ * One registration at a time per sandbox. A launch and a background sync can
+ * both find the same new sandbox; pairing it twice registers it twice, and
+ * the second registration replaces the first while it is still connecting.
+ */
+const registrationLock = PartitionedSemaphore.makeUnsafe<EnvironmentId>({ permits: 1 });
+
 /**
  * Makes one running sandbox reachable from this client: registers it on first
  * sight, and otherwise refreshes its saved address, since Docker publishes a
  * sandbox on a new port each time it starts. Returns its environment.
  */
-export const ensureSandboxEnvironment = Effect.fn("clientRuntime.sandbox.ensureEnvironment")(
-  function* (hostEnvironmentId: EnvironmentId, sandbox: SandboxSummary) {
-    if (sandbox.httpBaseUrl === null || sandbox.environmentId === null) {
-      return yield* new SandboxNotRunningError({ id: sandbox.id });
-    }
-    const registry = yield* EnvironmentRegistry.EnvironmentRegistry;
-    const onboarding = yield* ConnectionOnboarding.ConnectionOnboarding;
-    const entry = (yield* SubscriptionRef.get(registry.entries)).get(sandbox.environmentId);
-    const action = sandboxRegistrationAction(entry, sandbox.httpBaseUrl);
-    if (action.kind === "register") {
-      const pairing = yield* registry.run(
-        hostEnvironmentId,
-        request(WS_METHODS.sandboxPair, { id: sandbox.id }),
+export const ensureSandboxEnvironment = (
+  hostEnvironmentId: EnvironmentId,
+  sandbox: SandboxSummary,
+) =>
+  sandbox.httpBaseUrl === null || sandbox.environmentId === null
+    ? Effect.fail(new SandboxNotRunningError({ id: sandbox.id }))
+    : registrationLock.withPermit(sandbox.environmentId)(
+        registerSandboxEnvironment(hostEnvironmentId, sandbox, {
+          environmentId: sandbox.environmentId,
+          httpBaseUrl: sandbox.httpBaseUrl,
+        }),
       );
-      return yield* onboarding.registerPairing({
-        host: pairing.httpBaseUrl,
-        pairingCode: pairing.credential,
-      });
-    }
-    if (action.kind === "update") {
-      yield* onboarding.updateBearer({
-        environmentId: sandbox.environmentId,
-        label: action.label,
-        httpBaseUrl: action.httpBaseUrl,
-      });
-    }
-    return sandbox.environmentId;
-  },
-);
 
 /**
  * Brings this client's view of a host's sandboxes up to date and returns

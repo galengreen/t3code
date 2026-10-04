@@ -93,7 +93,11 @@ const fakeDocker = () => {
   return { containers, volumes, calls, envs, run };
 };
 
-const serviceLayer = (docker: ReturnType<typeof fakeDocker>, enableSandboxes = true) =>
+const serviceLayer = (
+  docker: ReturnType<typeof fakeDocker>,
+  enableSandboxes = true,
+  serving: () => boolean = () => true,
+) =>
   SandboxService.layer.pipe(
     Layer.provide(SandboxDrivers.layer),
     Layer.provideMerge(
@@ -117,7 +121,12 @@ const serviceLayer = (docker: ReturnType<typeof fakeDocker>, enableSandboxes = t
         HttpClient.HttpClient,
         HttpClient.make((request) =>
           Effect.succeed(
-            HttpClientResponse.fromWeb(request, Response.json({ environmentId: "env-sandbox" })),
+            HttpClientResponse.fromWeb(
+              request,
+              serving()
+                ? Response.json({ environmentId: "env-sandbox" })
+                : new Response(null, { status: 502 }),
+            ),
           ),
         ),
       ),
@@ -223,6 +232,22 @@ describe("SandboxService", () => {
       yield* sandboxes.remove({ id });
       expect(yield* sandboxes.list).toEqual([]);
     }).pipe(Effect.provide(serviceLayer(docker)));
+  });
+
+  it.effect("hides a running sandbox's address until its server answers", () => {
+    const docker = fakeDocker();
+    let serving = false;
+    const layer = serviceLayer(docker, true, () => serving);
+    return Effect.gen(function* () {
+      const sandboxes = yield* SandboxService.SandboxService;
+      serving = true;
+      const { id, environmentId } = yield* sandboxes.create({});
+      serving = false;
+      const [booting] = yield* sandboxes.list;
+      expect(booting).toMatchObject({ id, state: "running", httpBaseUrl: null, environmentId });
+      serving = true;
+      expect((yield* sandboxes.list)[0]?.httpBaseUrl).toBe("http://100.64.0.7:49999");
+    }).pipe(Effect.provide(layer));
   });
 
   it.effect("reports unknown sandboxes and ignores containers it did not create", () => {

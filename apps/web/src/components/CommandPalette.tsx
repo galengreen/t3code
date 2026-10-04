@@ -104,6 +104,7 @@ import { useEnvironmentQuery } from "../state/query";
 import { serverEnvironment } from "../state/server";
 import { threadEnvironment } from "../state/threads";
 import { sourceControlEnvironment } from "../state/sourceControl";
+import { useSandboxEnvironmentIds } from "../state/sandbox";
 import { useAtomCommand } from "../state/use-atom-command";
 import { useAtomQueryRunner } from "../state/use-atom-query-runner";
 import { useScratchProject } from "../hooks/useScratchProject";
@@ -965,13 +966,20 @@ function OpenCommandPaletteDialog(props: {
       }),
     [activeDraftThread, activeThread, defaultProjectRef, handleNewThread],
   );
+  const sandboxEnvironmentIds = useSandboxEnvironmentIds();
+  // A sandbox belongs to the thread that made it, so a new thread started from
+  // one goes to the project's main copy rather than into that sandbox.
+  const pickerPreferredProjectRef =
+    contextualProjectRef && !sandboxEnvironmentIds.has(contextualProjectRef.environmentId)
+      ? contextualProjectRef
+      : null;
   const projectPickerEntries = useMemo(
     () =>
       buildSidebarProjectPickerEntries({
         groups: projectGroups,
-        preferredProjectRef: contextualProjectRef,
+        preferredProjectRef: pickerPreferredProjectRef,
       }),
-    [contextualProjectRef, projectGroups],
+    [pickerPreferredProjectRef, projectGroups],
   );
   const pickerProjects = useMemo(
     () =>

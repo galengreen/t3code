@@ -27,7 +27,7 @@ export const SandboxSummary = Schema.Struct({
   image: Schema.String,
   state: SandboxState,
   createdAt: Schema.String,
-  /** The sandbox server's origin at the host's publish address, while running. */
+  /** Where clients reach the sandbox's server, once it answers; null while stopped or booting. */
   httpBaseUrl: Schema.NullOr(Schema.String),
   /**
    * The sandbox server's environment, stable across restarts. Known from
