@@ -171,6 +171,7 @@ import { cn } from "~/lib/utils";
 import { EnvironmentMachineIcon } from "./EnvironmentMachineIcon";
 import { ProjectEnvironmentBadge } from "./ProjectEnvironmentBadge";
 import { buildDraftActionMenuItems, buildThreadActionMenuItems } from "./threadActionMenu.logic";
+import { readThreadSandboxMenuState, useSandboxActions } from "../hooks/useSandboxActions";
 import {
   animateSidebarLayoutChanges,
   applySidebarThreadDrop,
@@ -2349,6 +2350,7 @@ export default function Sidebar() {
     archiveThread,
     deleteThread,
   } = useThreadActions();
+  const runSandboxAction = useSandboxActions();
   const updateThreadMetadata = useAtomCommand(threadEnvironment.updateMetadata, {
     reportFailure: false,
   });
@@ -4490,6 +4492,7 @@ export default function Sidebar() {
                 titleRegeneration: supportsTitleRegeneration,
               },
               snoozePresets,
+              sandbox: readThreadSandboxMenuState(thread.environmentId),
             }),
             position,
           ),
@@ -4504,6 +4507,11 @@ export default function Sidebar() {
           return;
         }
         switch (clicked.value) {
+          case "sandbox:start":
+          case "sandbox:stop":
+          case "sandbox:delete":
+            await runSandboxAction(thread.environmentId, clicked.value);
+            return;
           case "filter-by-project":
             // This item is the only scope control here, so picking the
             // already-scoped project again is the way back to all projects.
@@ -4698,6 +4706,7 @@ export default function Sidebar() {
       openProjectSettings,
       projectScopeKey,
       projectByKey,
+      runSandboxAction,
       serverConfigs,
       setProjectScopeKey,
       setThreadAutoSettle,

@@ -170,6 +170,16 @@ describe("buildThreadActionMenuItems", () => {
     );
     expect(archiveItem?.disabled).toBe(true);
   });
+
+  it("offers waking a stopped sandbox and stopping a running one, with delete beside", () => {
+    expect(allIds({ ...baseState, sandbox: { state: "stopped" } })).toEqual(
+      expect.arrayContaining(["sandbox", "sandbox:start", "sandbox:delete"]),
+    );
+    const running = allIds({ ...baseState, sandbox: { state: "running" } });
+    expect(running).toContain("sandbox:stop");
+    expect(running).not.toContain("sandbox:start");
+    expect(allIds(baseState)).not.toContain("sandbox");
+  });
 });
 
 describe("buildDraftActionMenuItems", () => {

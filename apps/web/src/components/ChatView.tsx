@@ -423,6 +423,11 @@ import { createPageScrollController, type PageScrollKey } from "./chat/pageScrol
 import { isTimelineScrollTarget } from "./chat/timelineScrollTarget";
 import { DraftHeroHeadline } from "./chat/DraftHeroHeadline";
 import { SandboxLaunchCard } from "./chat/SandboxLaunchCard";
+import {
+  changeSandbox,
+  useSandboxEnvironmentIds,
+  useSandboxForEnvironment,
+} from "../state/sandbox";
 import { ExpandedImageDialog } from "./chat/ExpandedImageDialog";
 import { PullRequestThreadDialog } from "./PullRequestThreadDialog";
 import type { AssistantCitationRequest } from "./chat/AssistantCitationSource";
@@ -2050,6 +2055,22 @@ export default function ChatView(props: ChatViewProps) {
     [draftThread, fallbackDraftProject, settings, threadId],
   );
   const isServerThread = serverThread !== null;
+  // Opening a thread whose sandbox is asleep wakes it, the way sending to it
+  // would; each sandbox is woken once per visit so a failed start is not retried
+  // in a loop.
+  const activeSandbox = useSandboxForEnvironment(isServerThread ? environmentId : null);
+  const wakeSandbox = useAtomCommand(changeSandbox, { label: "wake sandbox" });
+  const wokenSandboxIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!activeSandbox || activeSandbox.sandbox.state !== "stopped") return;
+    if (wokenSandboxIdRef.current === activeSandbox.sandbox.id) return;
+    wokenSandboxIdRef.current = activeSandbox.sandbox.id;
+    void wakeSandbox({
+      hostEnvironmentId: activeSandbox.hostEnvironmentId,
+      sandbox: activeSandbox.sandbox,
+      change: "start",
+    });
+  }, [activeSandbox, wakeSandbox]);
   const activeThread = isServerThread ? serverThread : localDraftThread;
   const serverLatestRun = useMemo(
     () => (serverProjection === null ? null : deriveLatestThreadRun(serverProjection)),
@@ -2670,8 +2691,13 @@ export default function ChatView(props: ChatViewProps) {
       activeProject,
       environmentById.get(activeProject.environmentId)?.serverConfig?.scratchWorkspaceRoot ?? null,
     );
+  const sandboxEnvironmentIds = useSandboxEnvironmentIds();
   const logicalProjectEnvironments = useMemo(() => {
     if (!activeProject) return [];
+    // A sandbox belongs to the thread that created it, so other drafts never
+    // offer it as a place to run; only the one already in it shows it.
+    const offersEnvironment = (id: EnvironmentId) =>
+      !sandboxEnvironmentIds.has(id) || id === environmentId;
     const envs: EnvironmentOption[] = [];
     const pushEnvironment = (environmentId: EnvironmentId, projectId: ProjectId | null) => {
       const environment = environmentById.get(environmentId) ?? null;
@@ -2691,6 +2717,7 @@ export default function ChatView(props: ChatViewProps) {
         // Keep the current machine visible so an offline source can still switch away.
         if (scratchRoot === null && environment.environmentId !== activeProject.environmentId)
           continue;
+        if (!offersEnvironment(environment.environmentId)) continue;
         const scratchProject =
           environment.environmentId === activeProject.environmentId
             ? activeProject
@@ -2707,7 +2734,7 @@ export default function ChatView(props: ChatViewProps) {
       );
       const seen = new Set<string>();
       for (const p of allProjects) {
-        if (seen.has(p.environmentId)) continue;
+        if (seen.has(p.environmentId) || !offersEnvironment(p.environmentId)) continue;
         if (deriveLogicalProjectKeyFromSettings(p, projectGroupingSettings) !== logicalKey)
           continue;
         seen.add(p.environmentId);
@@ -2725,10 +2752,12 @@ export default function ChatView(props: ChatViewProps) {
     activeProjectIsScratch,
     allProjects,
     draftId,
+    environmentId,
     environments,
     projectGroupingSettings,
     primaryEnvironmentId,
     environmentById,
+    sandboxEnvironmentIds,
     scratchWorkspaceRootFor,
   ]);
   const hasMultipleEnvironments = logicalProjectEnvironments.length > 1;

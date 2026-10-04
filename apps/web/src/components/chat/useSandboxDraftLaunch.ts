@@ -11,7 +11,7 @@ import {
 } from "../../logicalProject";
 import { appAtomRegistry } from "../../rpc/atomRegistry";
 import { environmentProjects } from "../../state/projects";
-import { connectSandbox, sandboxEnvironment } from "../../state/sandbox";
+import { connectSandbox, sandboxEnvironment, syncSandboxes } from "../../state/sandbox";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { waitForAtomValue } from "../../state/waitForAtomValue";
 
@@ -115,6 +115,7 @@ const failureMessage = (result: Parameters<typeof squashAtomCommandFailure>[0]) 
 export function useSandboxDraftLaunch() {
   const create = useAtomCommand(sandboxEnvironment.create, { reportFailure: false });
   const connect = useAtomCommand(connectSandbox, { reportFailure: false });
+  const sync = useAtomCommand(syncSandboxes, { reportFailure: false });
   const [state, setState] = useState<SandboxLaunchState>({ phase: "idle" });
 
   const launch = async (input: {
@@ -149,6 +150,8 @@ export function useSandboxDraftLaunch() {
     });
     if (connected._tag === "Failure") return fail(failureMessage(connected));
     const environmentId = connected.value;
+    // Thread menus find the new sandbox through the host's list.
+    void sync(input.hostEnvironmentId);
     const matches = (project: { environmentId: EnvironmentId }) =>
       project.environmentId === environmentId &&
       deriveLogicalProjectKeyFromSettings(

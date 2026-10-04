@@ -4,7 +4,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { BearerConnectionProfile } from "../connection/catalog.ts";
 import { BearerConnectionTarget, RelayConnectionTarget } from "../connection/model.ts";
-import { sandboxRegistrationAction } from "./sandbox.ts";
+import { findSandboxByEnvironment, sandboxRegistrationAction } from "./sandbox.ts";
 
 const environmentId = EnvironmentId.make("env-sandbox");
 const bearerEntry = (httpBaseUrl: string) => ({
@@ -46,5 +46,35 @@ describe("sandboxRegistrationAction", () => {
         "http://100.64.0.7:32770",
       ),
     ).toEqual({ kind: "none" });
+  });
+});
+
+describe("findSandboxByEnvironment", () => {
+  const sandbox = (id: string, env: string | null) => ({
+    id,
+    backend: "fly" as const,
+    label: id,
+    image: "image",
+    state: "stopped" as const,
+    createdAt: "2026-10-04T00:00:00Z",
+    httpBaseUrl: null,
+    environmentId: env === null ? null : EnvironmentId.make(env),
+  });
+  const hostA = EnvironmentId.make("host-a");
+  const hostB = EnvironmentId.make("host-b");
+  const lists = new Map([
+    [hostA, [sandbox("aaaaaaaaaaaa", null)]],
+    [hostB, [sandbox("bbbbbbbbbbbb", "env-sandbox")]],
+  ]);
+
+  it("finds a stopped sandbox by the environment it serves, with its host", () => {
+    expect(findSandboxByEnvironment(lists, environmentId)).toMatchObject({
+      hostEnvironmentId: hostB,
+      sandbox: { id: "bbbbbbbbbbbb", state: "stopped" },
+    });
+  });
+
+  it("treats environments no host knows as ordinary", () => {
+    expect(findSandboxByEnvironment(lists, EnvironmentId.make("laptop"))).toBeNull();
   });
 });

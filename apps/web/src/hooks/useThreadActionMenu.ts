@@ -39,6 +39,7 @@ import { buildPhysicalToLogicalProjectKeyMap } from "../sidebarProjectGrouping";
 import { threadRuntimeCanArchive } from "@t3tools/client-runtime/state/models";
 import { useCopyToClipboard } from "./useCopyToClipboard";
 import { useNewThreadHandler } from "./useHandleNewThread";
+import { readThreadSandboxMenuState, useSandboxActions } from "./useSandboxActions";
 import { useClientSettings } from "./useSettings";
 import { useThreadActions } from "./useThreadActions";
 
@@ -98,6 +99,7 @@ export function useThreadActionMenu(input: {
     reportFailure: false,
   });
   const handleNewThread = useNewThreadHandler();
+  const runSandboxAction = useSandboxActions();
   const confirmThreadDelete = useClientSettings((s) => s.confirmThreadDelete);
   const confirmThreadArchive = useClientSettings((s) => s.confirmThreadArchive);
   const timestampFormat = useClientSettings((s) => s.timestampFormat);
@@ -153,6 +155,7 @@ export function useThreadActionMenu(input: {
           isRunning: !threadRuntimeCanArchive(thread.runtime),
           supports,
           snoozePresets,
+          sandbox: readThreadSandboxMenuState(threadRef.environmentId),
         });
         const clicked = await settlePromise(() => api.contextMenu.show(items, position));
         if (clicked._tag === "Failure" || clicked.value === null) return;
@@ -179,6 +182,11 @@ export function useThreadActionMenu(input: {
           }
         };
         switch (action) {
+          case "sandbox:start":
+          case "sandbox:stop":
+          case "sandbox:delete":
+            await runSandboxAction(threadRef.environmentId, action);
+            return;
           case "project-settings": {
             const project = projects.find(
               (candidate) =>
@@ -341,6 +349,7 @@ export function useThreadActionMenu(input: {
       projectGroupingSettings,
       projects,
       router,
+      runSandboxAction,
       setThreadAutoSettle,
       settleThread,
       snoozeThread,

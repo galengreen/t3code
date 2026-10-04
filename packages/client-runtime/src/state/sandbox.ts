@@ -45,6 +45,27 @@ export function createSandboxEnvironmentAtoms<R, E>(
   };
 }
 
+/** A sandbox and the host environment that owns it. */
+export interface HostedSandbox {
+  readonly hostEnvironmentId: EnvironmentId;
+  readonly sandbox: SandboxSummary;
+}
+
+/**
+ * The sandbox serving `environmentId`, from each host's last known list.
+ * Null for ordinary environments.
+ */
+export function findSandboxByEnvironment(
+  sandboxesByHost: ReadonlyMap<EnvironmentId, ReadonlyArray<SandboxSummary>>,
+  environmentId: EnvironmentId,
+): HostedSandbox | null {
+  for (const [hostEnvironmentId, sandboxes] of sandboxesByHost) {
+    const sandbox = sandboxes.find((candidate) => candidate.environmentId === environmentId);
+    if (sandbox) return { hostEnvironmentId, sandbox };
+  }
+  return null;
+}
+
 /** What this client must do so a running sandbox is reachable. */
 export type SandboxRegistrationAction =
   | { readonly kind: "register" }
@@ -101,8 +122,9 @@ export const ensureSandboxEnvironment = Effect.fn("clientRuntime.sandbox.ensureE
 );
 
 /**
- * Brings this client's view of a host's sandboxes up to date. A sandbox that
- * fails to register is skipped and retried on the next sync.
+ * Brings this client's view of a host's sandboxes up to date and returns
+ * them. A sandbox that fails to register is skipped and retried on the next
+ * sync.
  */
 export const syncSandboxEnvironments = Effect.fn("clientRuntime.sandbox.syncEnvironments")(
   function* (hostEnvironmentId: EnvironmentId) {
@@ -120,5 +142,41 @@ export const syncSandboxEnvironments = Effect.fn("clientRuntime.sandbox.syncEnvi
         ),
       { discard: true },
     );
+    return sandboxes;
   },
 );
+
+export type SandboxChange = "start" | "stop" | "remove";
+
+/**
+ * Starts, stops, or deletes a sandbox through its host and returns the host's
+ * sandboxes afterwards. A started sandbox is reconnected at its new address;
+ * a deleted one is forgotten by this client, since its environment is gone.
+ */
+export const changeSandboxEnvironment = Effect.fn("clientRuntime.sandbox.change")(function* (
+  hostEnvironmentId: EnvironmentId,
+  sandbox: SandboxSummary,
+  change: SandboxChange,
+) {
+  const registry = yield* EnvironmentRegistry.EnvironmentRegistry;
+  switch (change) {
+    case "start": {
+      const started = yield* registry.run(
+        hostEnvironmentId,
+        request(WS_METHODS.sandboxStart, { id: sandbox.id }),
+      );
+      yield* ensureSandboxEnvironment(hostEnvironmentId, started);
+      break;
+    }
+    case "stop":
+      yield* registry.run(hostEnvironmentId, request(WS_METHODS.sandboxStop, { id: sandbox.id }));
+      break;
+    case "remove":
+      yield* registry.run(hostEnvironmentId, request(WS_METHODS.sandboxRemove, { id: sandbox.id }));
+      if (sandbox.environmentId !== null) {
+        yield* registry.remove(sandbox.environmentId).pipe(Effect.ignore);
+      }
+      break;
+  }
+  return yield* registry.run(hostEnvironmentId, request(WS_METHODS.sandboxList, {}));
+});

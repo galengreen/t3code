@@ -6,10 +6,14 @@ import { environmentServerConfigsAtom } from "../state/server";
 import { syncSandboxes } from "../state/sandbox";
 import { useAtomCommand } from "../state/use-atom-command";
 
+/** Sandboxes start, stop, and appear from other devices, so their lists are refreshed this often. */
+const REFRESH_INTERVAL_MS = 60_000;
+
 /**
  * Keeps every connected host's running sandboxes registered in this client, so
- * a sandbox created from any device shows up here without pairing by hand.
- * Runs when the set of sandbox-enabled hosts changes.
+ * a sandbox created from any device shows up here without pairing by hand, and
+ * keeps their states current for thread menus. Runs when the set of
+ * sandbox-enabled hosts changes, then once a minute while the window is shown.
  */
 export function SandboxEnvironmentSync() {
   const configs = useAtomValue(environmentServerConfigsAtom);
@@ -25,9 +29,16 @@ export function SandboxEnvironmentSync() {
   );
   useEffect(() => {
     if (hostKey === "") return;
-    for (const hostEnvironmentId of hostKey.split(",")) {
-      void sync(hostEnvironmentId as EnvironmentId);
-    }
+    const syncAll = () => {
+      for (const hostEnvironmentId of hostKey.split(",")) {
+        void sync(hostEnvironmentId as EnvironmentId);
+      }
+    };
+    syncAll();
+    const timer = setInterval(() => {
+      if (document.visibilityState === "visible") syncAll();
+    }, REFRESH_INTERVAL_MS);
+    return () => clearInterval(timer);
   }, [hostKey, sync]);
   return null;
 }

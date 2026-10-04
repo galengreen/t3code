@@ -1,4 +1,4 @@
-import type { ContextMenuItem } from "@t3tools/contracts";
+import type { ContextMenuItem, SandboxState } from "@t3tools/contracts";
 import type { SnoozePreset } from "@t3tools/client-runtime/state/thread-settled";
 
 /**
@@ -28,7 +28,11 @@ export type ThreadActionMenuId =
   | "copy-branch"
   | "copy-thread-id"
   | "archive"
-  | "delete";
+  | "delete"
+  | "sandbox"
+  | "sandbox:start"
+  | "sandbox:stop"
+  | "sandbox:delete";
 
 export type DraftActionMenuId =
   | "copy"
@@ -98,7 +102,15 @@ export interface ThreadActionMenuState {
     readonly titleRegeneration: boolean;
   };
   readonly snoozePresets: ReadonlyArray<SnoozePreset>;
+  /** The machine the thread runs in, when it is a sandbox. */
+  readonly sandbox?: { readonly state: SandboxState } | null;
 }
+
+const SANDBOX_STATE_LABELS: Record<SandboxState, string> = {
+  running: "running",
+  stopped: "stopped",
+  failed: "failed",
+};
 
 /**
  * Single source for the per-thread action menu: the sidebar row's right-click
@@ -216,6 +228,28 @@ export function buildThreadActionMenuItems(
       ],
     },
     { id: "project-settings", label: "Project settings", icon: "settings" },
+    // The thread's machine: waking it, putting it to sleep to stop billing,
+    // and deleting it with its files once the work has shipped.
+    ...(state.sandbox
+      ? [
+          {
+            id: "sandbox" as const,
+            label: `Sandbox (${SANDBOX_STATE_LABELS[state.sandbox.state]})`,
+            icon: "box",
+            children: [
+              state.sandbox.state === "running"
+                ? { id: "sandbox:stop" as const, label: "Stop sandbox" }
+                : { id: "sandbox:start" as const, label: "Start sandbox" },
+              {
+                id: "sandbox:delete" as const,
+                label: "Delete sandbox…",
+                destructive: true,
+                separatorBefore: true,
+              },
+            ],
+          },
+        ]
+      : []),
     // Archive removes the thread from the sidebar while keeping its
     // conversation under Settings > Archived threads — distinct from Settle
     // (stays visible in the Settled shelf) and Delete (clears history for
