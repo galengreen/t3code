@@ -55,6 +55,27 @@ const BACKEND_LABELS: Record<SandboxBackend, string> = {
   fly: "Fly.io",
 };
 
+const SLEEP_OPTIONS: ReadonlyArray<{ readonly minutes: number; readonly label: string }> = [
+  { minutes: 10, label: "After 10 minutes" },
+  { minutes: 20, label: "After 20 minutes" },
+  { minutes: 60, label: "After 1 hour" },
+  { minutes: 240, label: "After 4 hours" },
+  { minutes: 0, label: "Never" },
+];
+
+const DELETE_OPTIONS: ReadonlyArray<{ readonly days: number; readonly label: string }> = [
+  { days: 3, label: "After 3 days" },
+  { days: 7, label: "After 7 days" },
+  { days: 14, label: "After 14 days" },
+  { days: 30, label: "After 30 days" },
+  { days: 0, label: "Never" },
+];
+
+const sleepLabel = (minutes: number) =>
+  SLEEP_OPTIONS.find((option) => option.minutes === minutes)?.label ?? `After ${minutes} minutes`;
+const deleteLabel = (days: number) =>
+  DELETE_OPTIONS.find((option) => option.days === days)?.label ?? `After ${days} days`;
+
 const SIZE_LABELS: Record<SandboxSize, string> = {
   small: "Small · 2 vCPU, 2 GB",
   medium: "Medium · 4 vCPU, 8 GB",
@@ -131,6 +152,58 @@ function SandboxControls({ environmentId }: { readonly environmentId: Environmen
                   {(Object.keys(SIZE_LABELS) as ReadonlyArray<SandboxSize>).map((size) => (
                     <SelectItem hideIndicator key={size} value={size}>
                       {SIZE_LABELS[size]}
+                    </SelectItem>
+                  ))}
+                </SelectPopup>
+              </Select>
+            }
+          />
+          <SettingsRow
+            {...searchableSetting("sandbox-sleep")}
+            description="Stop a sandbox once no agent is working in it and nobody has used it for this long, so it stops costing money. Opening its thread wakes it. Applies to sandboxes created afterwards."
+            control={
+              <Select
+                value={String(settings.sandboxSleepAfterMinutes)}
+                onValueChange={(value) => {
+                  const minutes = Number(value);
+                  if (Number.isInteger(minutes)) void save({ sandboxSleepAfterMinutes: minutes });
+                }}
+              >
+                <SelectTrigger size="sm" className="w-full sm:w-56" aria-label="Sleep when idle">
+                  <SelectValue>{sleepLabel(settings.sandboxSleepAfterMinutes)}</SelectValue>
+                </SelectTrigger>
+                <SelectPopup align="end" alignItemWithTrigger={false}>
+                  {SLEEP_OPTIONS.map((option) => (
+                    <SelectItem hideIndicator key={option.minutes} value={String(option.minutes)}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectPopup>
+              </Select>
+            }
+          />
+          <SettingsRow
+            {...searchableSetting("sandbox-delete")}
+            description="Delete a sandbox that has stayed stopped this long. Its files go with it, including changes that were not pushed."
+            control={
+              <Select
+                value={String(settings.sandboxDeleteAfterDays)}
+                onValueChange={(value) => {
+                  const days = Number(value);
+                  if (Number.isInteger(days)) void save({ sandboxDeleteAfterDays: days });
+                }}
+              >
+                <SelectTrigger
+                  size="sm"
+                  className="w-full sm:w-56"
+                  aria-label="Delete stopped sandboxes"
+                >
+                  <SelectValue>{deleteLabel(settings.sandboxDeleteAfterDays)}</SelectValue>
+                </SelectTrigger>
+                <SelectPopup align="end" alignItemWithTrigger={false}>
+                  {DELETE_OPTIONS.map((option) => (
+                    <SelectItem hideIndicator key={option.days} value={String(option.days)}>
+                      {option.label}
                     </SelectItem>
                   ))}
                 </SelectPopup>

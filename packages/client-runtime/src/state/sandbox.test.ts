@@ -4,7 +4,11 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { BearerConnectionProfile } from "../connection/catalog.ts";
 import { BearerConnectionTarget, RelayConnectionTarget } from "../connection/model.ts";
-import { findSandboxByEnvironment, sandboxRegistrationAction } from "./sandbox.ts";
+import {
+  findSandboxByEnvironment,
+  sandboxConnectionChange,
+  sandboxRegistrationAction,
+} from "./sandbox.ts";
 
 const environmentId = EnvironmentId.make("env-sandbox");
 const bearerEntry = (httpBaseUrl: string) => ({
@@ -66,6 +70,7 @@ describe("findSandboxByEnvironment", () => {
     image: "image",
     state: "stopped" as const,
     createdAt: "2026-10-04T00:00:00Z",
+    stoppedAt: "2026-10-04T01:00:00Z",
     httpBaseUrl: null,
     environmentId: env === null ? null : EnvironmentId.make(env),
   });
@@ -85,5 +90,26 @@ describe("findSandboxByEnvironment", () => {
 
   it("treats environments no host knows as ordinary", () => {
     expect(findSandboxByEnvironment(lists, EnvironmentId.make("laptop"))).toBeNull();
+  });
+});
+
+describe("sandboxConnectionChange", () => {
+  const serving = { state: "running" as const, httpBaseUrl: "https://t3-sbx-abc.fly.dev" };
+  const booting = { state: "running" as const, httpBaseUrl: null };
+  const asleep = { state: "stopped" as const, httpBaseUrl: null };
+
+  it("switches a sleeping sandbox's connection off so the client stops retrying it", () => {
+    expect(sandboxConnectionChange({ enabled: true }, asleep)).toBe("disable");
+    expect(sandboxConnectionChange({ enabled: false }, asleep)).toBe("none");
+  });
+
+  it("switches it back on once the sandbox serves again, whoever woke it", () => {
+    expect(sandboxConnectionChange({ enabled: false }, serving)).toBe("enable");
+    expect(sandboxConnectionChange({ enabled: false }, booting)).toBe("none");
+    expect(sandboxConnectionChange({ enabled: true }, serving)).toBe("none");
+  });
+
+  it("leaves sandboxes this client never registered alone", () => {
+    expect(sandboxConnectionChange(undefined, asleep)).toBe("none");
   });
 });

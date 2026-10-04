@@ -288,6 +288,7 @@ import { isEditableFocused } from "../lib/editableFocus";
 import ThreadTerminalDrawer from "./ThreadTerminalDrawer";
 import {
   AlarmClockIcon,
+  BoxIcon,
   CheckCircle2Icon,
   PaperclipIcon,
   ChevronDownIcon,
@@ -425,6 +426,7 @@ import { DraftHeroHeadline } from "./chat/DraftHeroHeadline";
 import { SandboxLaunchCard } from "./chat/SandboxLaunchCard";
 import {
   changeSandbox,
+  usePendingSandboxChange,
   useSandboxEnvironmentIds,
   useSandboxForEnvironment,
 } from "../state/sandbox";
@@ -2060,17 +2062,22 @@ export default function ChatView(props: ChatViewProps) {
   // while reading the thread stays stopped, and a failed start is not retried.
   const activeSandbox = useSandboxForEnvironment(isServerThread ? environmentId : null);
   const wakeSandbox = useAtomCommand(changeSandbox, { label: "wake sandbox" });
-  const arrivedSandboxIdRef = useRef<string | null>(null);
-  useEffect(() => {
-    if (!activeSandbox || arrivedSandboxIdRef.current === activeSandbox.sandbox.id) return;
-    arrivedSandboxIdRef.current = activeSandbox.sandbox.id;
-    if (activeSandbox.sandbox.state !== "stopped") return;
+  const activeSandboxPendingChange = usePendingSandboxChange(activeSandbox?.sandbox.id ?? null);
+  const wakeActiveSandbox = useCallback(() => {
+    if (!activeSandbox) return;
     void wakeSandbox({
       hostEnvironmentId: activeSandbox.hostEnvironmentId,
       sandbox: activeSandbox.sandbox,
       change: "start",
     });
   }, [activeSandbox, wakeSandbox]);
+  const arrivedSandboxIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!activeSandbox || arrivedSandboxIdRef.current === activeSandbox.sandbox.id) return;
+    arrivedSandboxIdRef.current = activeSandbox.sandbox.id;
+    if (activeSandbox.sandbox.state !== "stopped") return;
+    wakeActiveSandbox();
+  }, [activeSandbox, wakeActiveSandbox]);
   const activeThread = isServerThread ? serverThread : localDraftThread;
   const serverLatestRun = useMemo(
     () => (serverProjection === null ? null : deriveLatestThreadRun(serverProjection)),
@@ -7308,6 +7315,26 @@ export default function ChatView(props: ChatViewProps) {
   // A woken thread announces itself in the open view, not just the sidebar
   // pill. Dismissing marks the wake as seen (same acknowledgment as the
   // pill); sending a message clears it as a side effect of the send path.
+  // A sandbox that went to sleep while its thread is open says so, with the
+  // way back, instead of leaving the thread looking disconnected.
+  const sandboxSleepBannerItem = useMemo<ComposerBannerStackItem | null>(() => {
+    if (!activeSandbox || activeSandbox.sandbox.state === "running") return null;
+    const waking = activeSandboxPendingChange === "start";
+    return {
+      id: `sandbox-asleep:${activeSandbox.sandbox.id}`,
+      variant: "info",
+      icon: <BoxIcon />,
+      title: waking ? "Waking this thread's sandbox…" : "This thread's sandbox is asleep",
+      description: waking
+        ? "It stopped while idle and is starting again"
+        : "It stopped while idle. Wake it to continue",
+      actions: (
+        <Button size="xs" variant="ghost" disabled={waking} onClick={wakeActiveSandbox}>
+          {waking ? "Waking..." : "Wake"}
+        </Button>
+      ),
+    };
+  }, [activeSandbox, activeSandboxPendingChange, wakeActiveSandbox]);
   const wokeThreadBannerItem = useMemo<ComposerBannerStackItem | null>(() => {
     if (!activeThreadWokeVisible) {
       return null;
@@ -7516,7 +7543,10 @@ export default function ChatView(props: ChatViewProps) {
     const parkedThreadItems = parkedThreadBannerItem === null ? [] : [parkedThreadBannerItem];
     // The user asked for this one, so it leads the notice tier instead of trailing it.
     const usageLimitsItems = usageLimitsBanner === null ? [] : [usageLimitsBanner];
-    const projectCloneItems = projectCloneBannerItem === null ? [] : [projectCloneBannerItem];
+    const projectCloneItems = [
+      ...(projectCloneBannerItem === null ? [] : [projectCloneBannerItem]),
+      ...(sandboxSleepBannerItem === null ? [] : [sandboxSleepBannerItem]),
+    ];
     if (!localCheckoutBranchMismatch || !showBranchMismatchBanner || !activeBranchMismatchKey) {
       return [
         ...feedbackBannerItems,
@@ -7592,6 +7622,7 @@ export default function ChatView(props: ChatViewProps) {
     parkedThreadBannerItem,
     projectCloneBannerItem,
     resumeCompactionBannerItem,
+    sandboxSleepBannerItem,
     showBranchMismatchBanner,
     systemComposerBannerItems,
     usageLimitsBanner,

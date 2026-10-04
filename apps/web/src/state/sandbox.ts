@@ -38,6 +38,26 @@ const recordHostSandboxes = (
     appAtomRegistry.set(hostSandboxesAtom, next);
   });
 
+/** Changes in flight per sandbox id, so every surface can show a sandbox waking or stopping. */
+const pendingSandboxChangesAtom = Atom.make<ReadonlyMap<string, SandboxChange>>(new Map()).pipe(
+  Atom.keepAlive,
+  Atom.withLabel("web:sandbox:pending-changes"),
+);
+
+const setPendingSandboxChange = (sandboxId: string, change: SandboxChange | null) =>
+  Effect.sync(() => {
+    const next = new Map(appAtomRegistry.get(pendingSandboxChangesAtom));
+    if (change === null) next.delete(sandboxId);
+    else next.set(sandboxId, change);
+    appAtomRegistry.set(pendingSandboxChangesAtom, next);
+  });
+
+/** The change in flight for a sandbox, if any. */
+export function usePendingSandboxChange(sandboxId: string | null): SandboxChange | null {
+  const pending = useAtomValue(pendingSandboxChangesAtom);
+  return sandboxId === null ? null : (pending.get(sandboxId) ?? null);
+}
+
 /** The sandbox serving an environment, for thread menus read at open time. */
 export function readSandboxForEnvironment(environmentId: EnvironmentId) {
   return findSandboxByEnvironment(appAtomRegistry.get(hostSandboxesAtom), environmentId);
@@ -80,8 +100,12 @@ export const changeSandbox = createRuntimeCommand(connectionAtomRuntime, {
     readonly sandbox: SandboxSummary;
     readonly change: SandboxChange;
   }) =>
-    changeSandboxEnvironment(input.hostEnvironmentId, input.sandbox, input.change).pipe(
+    setPendingSandboxChange(input.sandbox.id, input.change).pipe(
+      Effect.andThen(
+        changeSandboxEnvironment(input.hostEnvironmentId, input.sandbox, input.change),
+      ),
       Effect.tap((sandboxes) => recordHostSandboxes(input.hostEnvironmentId, sandboxes)),
+      Effect.ensuring(setPendingSandboxChange(input.sandbox.id, null)),
     ),
 });
 

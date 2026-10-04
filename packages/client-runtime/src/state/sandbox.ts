@@ -152,16 +152,44 @@ export const ensureSandboxEnvironment = (
       );
 
 /**
+ * Whether this client's connection to a sandbox should be switched on or off
+ * to match it. A sleeping sandbox's connection is switched off so the client
+ * stops retrying it, and back on once the sandbox is serving again, whoever
+ * woke it.
+ */
+export function sandboxConnectionChange(
+  entry: Pick<ConnectionCatalogEntry, "enabled"> | undefined,
+  sandbox: Pick<SandboxSummary, "state" | "httpBaseUrl">,
+): "enable" | "disable" | "none" {
+  if (entry === undefined) return "none";
+  if (sandbox.state !== "running") return entry.enabled ? "disable" : "none";
+  return sandbox.httpBaseUrl !== null && !entry.enabled ? "enable" : "none";
+}
+
+/**
  * Brings this client's view of a host's sandboxes up to date and returns
- * them. A sandbox that fails to register is skipped and retried on the next
- * sync.
+ * them: serving sandboxes are registered or re-addressed, and connections
+ * follow each sandbox's state. A sandbox that fails to register is skipped
+ * and retried on the next sync.
  */
 export const syncSandboxEnvironments = Effect.fn("clientRuntime.sandbox.syncEnvironments")(
   function* (hostEnvironmentId: EnvironmentId) {
     const registry = yield* EnvironmentRegistry.EnvironmentRegistry;
     const sandboxes = yield* registry.run(hostEnvironmentId, request(WS_METHODS.sandboxList, {}));
+    const entries = yield* SubscriptionRef.get(registry.entries);
     yield* Effect.forEach(
-      sandboxes.filter((sandbox) => sandbox.state === "running"),
+      sandboxes,
+      (sandbox) => {
+        if (sandbox.environmentId === null) return Effect.void;
+        const change = sandboxConnectionChange(entries.get(sandbox.environmentId), sandbox);
+        return change === "none"
+          ? Effect.void
+          : registry.setEnabled(sandbox.environmentId, change === "enable").pipe(Effect.ignore);
+      },
+      { discard: true },
+    );
+    yield* Effect.forEach(
+      sandboxes.filter((sandbox) => sandbox.state === "running" && sandbox.httpBaseUrl !== null),
       (sandbox) =>
         ensureSandboxEnvironment(hostEnvironmentId, sandbox).pipe(
           Effect.catchCause((cause) =>
