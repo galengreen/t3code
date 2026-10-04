@@ -1,8 +1,7 @@
-import { useAtomValue } from "@effect/atom-react";
 import type { EnvironmentId } from "@t3tools/contracts";
 import { useEffect, useMemo } from "react";
 
-import { environmentServerConfigsAtom } from "../state/server";
+import { useEnvironments } from "../state/environments";
 import { syncSandboxes } from "../state/sandbox";
 import { useAtomCommand } from "../state/use-atom-command";
 
@@ -12,20 +11,26 @@ const REFRESH_INTERVAL_MS = 60_000;
 /**
  * Keeps every connected host's running sandboxes registered in this client, so
  * a sandbox created from any device shows up here without pairing by hand, and
- * keeps their states current for thread menus. Runs when the set of
- * sandbox-enabled hosts changes, then once a minute while the window is shown.
+ * keeps their states current for thread menus. Runs when a sandbox-enabled
+ * host connects, then once a minute while the window is shown.
  */
 export function SandboxEnvironmentSync() {
-  const configs = useAtomValue(environmentServerConfigsAtom);
+  const { environments } = useEnvironments();
   const sync = useAtomCommand(syncSandboxes, { reportFailure: false });
+  // Cached configs are known before the socket connects, and a request then
+  // fails, so a host only counts once it is connected.
   const hostKey = useMemo(
     () =>
-      [...configs]
-        .filter(([, config]) => config.settings.enableSandboxes)
-        .map(([environmentId]) => environmentId)
+      environments
+        .filter(
+          (environment) =>
+            environment.connection.phase === "connected" &&
+            environment.serverConfig?.settings.enableSandboxes === true,
+        )
+        .map((environment) => environment.environmentId)
         .toSorted()
         .join(","),
-    [configs],
+    [environments],
   );
   useEffect(() => {
     if (hostKey === "") return;

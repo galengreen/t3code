@@ -150,8 +150,10 @@ export type SandboxChange = "start" | "stop" | "remove";
 
 /**
  * Starts, stops, or deletes a sandbox through its host and returns the host's
- * sandboxes afterwards. A started sandbox is reconnected at its new address;
- * a deleted one is forgotten by this client, since its environment is gone.
+ * sandboxes afterwards. Stopping also switches this client's connection to it
+ * off: retrying a stopped sandbox would only fail, and a Fly sandbox starts
+ * again whenever something connects to it. Starting switches it back on at
+ * the sandbox's new address; deleting forgets it, since its environment is gone.
  */
 export const changeSandboxEnvironment = Effect.fn("clientRuntime.sandbox.change")(function* (
   hostEnvironmentId: EnvironmentId,
@@ -165,10 +167,16 @@ export const changeSandboxEnvironment = Effect.fn("clientRuntime.sandbox.change"
         hostEnvironmentId,
         request(WS_METHODS.sandboxStart, { id: sandbox.id }),
       );
+      if (started.environmentId !== null) {
+        yield* registry.setEnabled(started.environmentId, true).pipe(Effect.ignore);
+      }
       yield* ensureSandboxEnvironment(hostEnvironmentId, started);
       break;
     }
     case "stop":
+      if (sandbox.environmentId !== null) {
+        yield* registry.setEnabled(sandbox.environmentId, false).pipe(Effect.ignore);
+      }
       yield* registry.run(hostEnvironmentId, request(WS_METHODS.sandboxStop, { id: sandbox.id }));
       break;
     case "remove":

@@ -4,6 +4,7 @@ import {
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
 import type { EnvironmentId } from "@t3tools/contracts";
+import { useRouter } from "@tanstack/react-router";
 import { useCallback } from "react";
 
 import { stackedThreadToast, toastManager } from "../components/ui/toast";
@@ -27,11 +28,12 @@ export function readThreadSandboxMenuState(environmentId: EnvironmentId) {
 
 /**
  * Runs a thread menu's sandbox action against the sandbox serving the
- * thread's environment. Deleting asks first, since the sandbox's files,
- * including anything not pushed, go with it.
+ * thread's environment. Deleting asks first, since the sandbox holds its
+ * threads' conversations and files, and leaves any of its threads on screen.
  */
 export function useSandboxActions() {
   const change = useAtomCommand(changeSandbox, { reportFailure: false });
+  const router = useRouter();
   return useCallback(
     async (environmentId: EnvironmentId, action: SandboxMenuAction) => {
       const hosted = readSandboxForEnvironment(environmentId);
@@ -43,7 +45,7 @@ export function useSandboxActions() {
           api.dialogs.confirm(
             [
               `Delete sandbox "${hosted.sandbox.label}"?`,
-              "Its files go with it, including changes that were not pushed. The thread's conversation stays but can no longer run.",
+              "Its threads and files go with it, including changes that were not pushed.",
             ].join("\n"),
             { variant: "destructive" },
           ),
@@ -56,6 +58,13 @@ export function useSandboxActions() {
         change:
           action === "sandbox:start" ? "start" : action === "sandbox:stop" ? "stop" : "remove",
       });
+      if (
+        result._tag === "Success" &&
+        action === "sandbox:delete" &&
+        router.state.location.pathname.startsWith(`/${environmentId}/`)
+      ) {
+        void router.navigate({ to: "/" });
+      }
       if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
         const error = squashAtomCommandFailure(result);
         toastManager.add(
@@ -67,6 +76,6 @@ export function useSandboxActions() {
         );
       }
     },
-    [change],
+    [change, router],
   );
 }

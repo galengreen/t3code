@@ -2056,15 +2056,15 @@ export default function ChatView(props: ChatViewProps) {
   );
   const isServerThread = serverThread !== null;
   // Opening a thread whose sandbox is asleep wakes it, the way sending to it
-  // would; each sandbox is woken once per visit so a failed start is not retried
-  // in a loop.
+  // would. Only the state found on arrival counts: a sandbox the user stops
+  // while reading the thread stays stopped, and a failed start is not retried.
   const activeSandbox = useSandboxForEnvironment(isServerThread ? environmentId : null);
   const wakeSandbox = useAtomCommand(changeSandbox, { label: "wake sandbox" });
-  const wokenSandboxIdRef = useRef<string | null>(null);
+  const arrivedSandboxIdRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!activeSandbox || activeSandbox.sandbox.state !== "stopped") return;
-    if (wokenSandboxIdRef.current === activeSandbox.sandbox.id) return;
-    wokenSandboxIdRef.current = activeSandbox.sandbox.id;
+    if (!activeSandbox || arrivedSandboxIdRef.current === activeSandbox.sandbox.id) return;
+    arrivedSandboxIdRef.current = activeSandbox.sandbox.id;
+    if (activeSandbox.sandbox.state !== "stopped") return;
     void wakeSandbox({
       hostEnvironmentId: activeSandbox.hostEnvironmentId,
       sandbox: activeSandbox.sandbox,
