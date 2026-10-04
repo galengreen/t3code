@@ -3584,6 +3584,12 @@ const makeWsRpcLayer = (
           observeRpcEffect(WS_METHODS.sandboxPair, sandboxService.pair(input), {
             "rpc.aggregate": "sandbox",
           }),
+        [WS_METHODS.sandboxRemovedEnvironments]: (_input) =>
+          observeRpcEffect(
+            WS_METHODS.sandboxRemovedEnvironments,
+            sandboxService.removedEnvironments,
+            { "rpc.aggregate": "sandbox" },
+          ),
         [WS_METHODS.sandboxFlyAccount]: (input) =>
           observeRpcEffect(WS_METHODS.sandboxFlyAccount, sandboxService.flyAccount(input), {
             "rpc.aggregate": "sandbox",

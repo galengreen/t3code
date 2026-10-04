@@ -34,10 +34,14 @@ import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
+import * as Semaphore from "effect/Semaphore";
 import { HttpClient } from "effect/unstable/http";
 
+import * as ServerConfig from "../config.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import { SandboxDrivers, type SandboxMachine, type SandboxOperation } from "./SandboxDriver.ts";
 import { flyAccount } from "./FlySandboxDriver.ts";
@@ -50,6 +54,14 @@ const PairingCredential = Schema.Struct({ credential: Schema.String, expiresAt: 
 const decodePairing = Schema.decodeUnknownEffect(Schema.fromJsonString(PairingCredential));
 
 const EnvironmentDescriptor = Schema.Struct({ environmentId: EnvironmentId });
+
+/** Long enough for a client that was away for a while to still learn a sandbox went. */
+const REMOVED_RETENTION = Duration.days(90);
+const RemovedRecords = Schema.fromJsonString(
+  Schema.Array(Schema.Struct({ environmentId: EnvironmentId, removedAt: Schema.Number })),
+);
+const decodeRemovedRecords = Schema.decodeUnknownEffect(RemovedRecords);
+const encodeRemovedRecords = Schema.encodeEffect(RemovedRecords);
 const decodeDescriptor = Schema.decodeUnknownEffect(EnvironmentDescriptor);
 
 export class SandboxService extends Context.Service<
@@ -70,6 +82,11 @@ export class SandboxService extends Context.Service<
      * `sandboxDeleteAfterDays` setting allows, returning their ids.
      */
     readonly pruneStopped: Effect.Effect<ReadonlyArray<SandboxId>, SandboxError>;
+    /**
+     * Environments of sandboxes deleted in the last 90 days, so every client
+     * can forget its connection to one, whoever or whatever deleted it.
+     */
+    readonly removedEnvironments: Effect.Effect<ReadonlyArray<EnvironmentId>, SandboxError>;
     /** What a Fly token (the given one, else the saved one) can reach. */
     readonly flyAccount: (
       input: SandboxFlyAccountInput,
@@ -84,6 +101,48 @@ const make = Effect.gen(function* () {
   const drivers = yield* SandboxDrivers;
   const httpClient = yield* HttpClient.HttpClient;
   const crypto = yield* Crypto.Crypto;
+  const fileSystem = yield* FileSystem.FileSystem;
+  const removedPath = (yield* Path.Path).join(
+    (yield* ServerConfig.ServerConfig).stateDir,
+    "sandbox-removed.json",
+  );
+  const removedLock = yield* Semaphore.make(1);
+
+  /** Deleted sandboxes' environments still within the retention window. */
+  const readRemoved = Effect.gen(function* () {
+    const now = yield* Clock.currentTimeMillis;
+    const records = yield* fileSystem.readFileString(removedPath).pipe(
+      Effect.flatMap(decodeRemovedRecords),
+      Effect.orElseSucceed(() => []),
+    );
+    return records.filter(
+      (record) => now - record.removedAt < Duration.toMillis(REMOVED_RETENTION),
+    );
+  });
+
+  /** Remembers a deleted sandbox's environment; losing the note only leaves a stale connection. */
+  const recordRemoved = (environmentId: EnvironmentId | null) =>
+    environmentId === null
+      ? Effect.void
+      : removedLock
+          .withPermits(1)(
+            Effect.gen(function* () {
+              const now = yield* Clock.currentTimeMillis;
+              const kept = (yield* readRemoved).filter(
+                (record) => record.environmentId !== environmentId,
+              );
+              const encoded = yield* encodeRemovedRecords([
+                ...kept,
+                { environmentId, removedAt: now },
+              ]);
+              yield* fileSystem.writeFileString(removedPath, encoded);
+            }),
+          )
+          .pipe(
+            Effect.catchCause((cause) =>
+              Effect.logWarning("Could not record a deleted sandbox", { cause }),
+            ),
+          );
 
   const readSettings = settings.getSettings.pipe(
     Effect.mapError(() => new SandboxUnavailableError({ reason: "Settings could not be read." })),
@@ -254,8 +313,9 @@ const make = Effect.gen(function* () {
 
   const remove: SandboxService["Service"]["remove"] = Effect.fn("SandboxService.remove")(
     function* ({ id }) {
-      const { backend } = yield* locate(id, "remove");
+      const { backend, machine } = yield* locate(id, "remove");
       yield* drivers[backend].remove(id);
+      yield* recordRemoved(machine.environmentId);
     },
   );
 
@@ -306,6 +366,7 @@ const make = Effect.gen(function* () {
         const stoppedAt = machine.stoppedAt === null ? NaN : Date.parse(machine.stoppedAt);
         if (machine.state !== "stopped" || !(stoppedAt < cutoff)) continue;
         yield* drivers[backend].remove(machine.id);
+        yield* recordRemoved(machine.environmentId);
         yield* Effect.logInfo("Deleted a long-stopped sandbox", {
           id: machine.id,
           label: machine.label,
@@ -325,6 +386,10 @@ const make = Effect.gen(function* () {
     remove,
     pair,
     pruneStopped,
+    removedEnvironments: ensureAvailable.pipe(
+      Effect.andThen(readRemoved),
+      Effect.map((records) => records.map((record) => record.environmentId)),
+    ),
     flyAccount: flyAccountOf,
   });
 });

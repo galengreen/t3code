@@ -10,7 +10,7 @@ import * as Schema from "effect/Schema";
 import * as Rpc from "effect/unstable/rpc/Rpc";
 import * as RpcGroup from "effect/unstable/rpc/RpcGroup";
 import * as RpcMiddleware from "effect/unstable/rpc/RpcMiddleware";
-import { NonNegativeInt, TrimmedNonEmptyString } from "./baseSchemas.ts";
+import { EnvironmentId, NonNegativeInt, TrimmedNonEmptyString } from "./baseSchemas.ts";
 import {
   CodexAuthCallbackInput,
   CodexAuthCallbackState,
@@ -447,6 +447,7 @@ export const WS_METHODS = {
   sandboxRemove: "sandbox.remove",
   sandboxPair: "sandbox.pair",
   sandboxFlyAccount: "sandbox.flyAccount",
+  sandboxRemovedEnvironments: "sandbox.removedEnvironments",
 
   // Server meta
   serverProbe: "server.probe",
@@ -1495,6 +1496,12 @@ const WsSandboxPairRpc = Rpc.make(WS_METHODS.sandboxPair, {
   error: Schema.Union([SandboxError, EnvironmentAuthorizationError]),
 });
 
+const WsSandboxRemovedEnvironmentsRpc = Rpc.make(WS_METHODS.sandboxRemovedEnvironments, {
+  payload: Schema.Struct({}),
+  success: Schema.Array(EnvironmentId),
+  error: Schema.Union([SandboxError, EnvironmentAuthorizationError]),
+});
+
 const WsSandboxFlyAccountRpc = Rpc.make(WS_METHODS.sandboxFlyAccount, {
   payload: SandboxFlyAccountInput,
   success: SandboxFlyAccount,
@@ -1922,6 +1929,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsSandboxStopRpc,
   WsSandboxRemoveRpc,
   WsSandboxFlyAccountRpc,
+  WsSandboxRemovedEnvironmentsRpc,
   WsSandboxPairRpc,
   WsSubscribeServerConfigRpc,
   WsSubscribeServerLifecycleRpc,

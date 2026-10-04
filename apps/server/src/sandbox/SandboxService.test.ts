@@ -1,10 +1,12 @@
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
+import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as TestClock from "effect/testing/TestClock";
 import * as Layer from "effect/Layer";
 import { HttpClient, HttpClientResponse } from "effect/unstable/http";
 
+import * as ServerConfig from "../config.ts";
 import * as ProcessRunner from "../processRunner.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as SandboxDrivers from "./SandboxDrivers.ts";
@@ -147,6 +149,10 @@ const serviceLayer = (
       ),
     ),
     Layer.provide(NodeCrypto.layer),
+    Layer.provideMerge(
+      Layer.fresh(ServerConfig.layerTest(process.cwd(), { prefix: "t3code-sandbox-test-" })),
+    ),
+    Layer.provideMerge(NodeServices.layer),
   );
 
 describe("SandboxService", () => {
@@ -225,9 +231,12 @@ describe("SandboxService", () => {
         credential: "PAIR1234",
         expiresAt: "2026-10-03T01:00:00Z",
       });
+      const { environmentId } = (yield* sandboxes.list)[0]!;
       yield* sandboxes.remove({ id });
       expect(yield* sandboxes.list).toEqual([]);
       expect(docker.volumes.size).toBe(0);
+      // Every client learns the sandbox is gone, so none keeps retrying it.
+      expect(yield* sandboxes.removedEnvironments).toEqual([environmentId]);
     }).pipe(Effect.provide(serviceLayer(docker)));
   });
 

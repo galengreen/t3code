@@ -168,14 +168,25 @@ export function sandboxConnectionChange(
 
 /**
  * Brings this client's view of a host's sandboxes up to date and returns
- * them: serving sandboxes are registered or re-addressed, and connections
- * follow each sandbox's state. A sandbox that fails to register is skipped
+ * them: serving sandboxes are registered or re-addressed, connections follow
+ * each sandbox's state, and connections to deleted sandboxes are forgotten. A sandbox that fails to register is skipped
  * and retried on the next sync.
  */
 export const syncSandboxEnvironments = Effect.fn("clientRuntime.sandbox.syncEnvironments")(
   function* (hostEnvironmentId: EnvironmentId) {
     const registry = yield* EnvironmentRegistry.EnvironmentRegistry;
     const sandboxes = yield* registry.run(hostEnvironmentId, request(WS_METHODS.sandboxList, {}));
+    // A sandbox deleted anywhere (another device, the CLI, automatic removal)
+    // leaves this client a connection that can never connect again.
+    const removed = yield* registry
+      .run(hostEnvironmentId, request(WS_METHODS.sandboxRemovedEnvironments, {}))
+      .pipe(Effect.orElseSucceed((): ReadonlyArray<EnvironmentId> => []));
+    const knownBeforeRemoval = yield* SubscriptionRef.get(registry.entries);
+    yield* Effect.forEach(
+      removed.filter((environmentId) => knownBeforeRemoval.has(environmentId)),
+      (environmentId) => registry.remove(environmentId).pipe(Effect.ignore),
+      { discard: true },
+    );
     const entries = yield* SubscriptionRef.get(registry.entries);
     yield* Effect.forEach(
       sandboxes,
