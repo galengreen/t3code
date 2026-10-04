@@ -422,6 +422,7 @@ import { ChatComposer, type ChatComposerHandle } from "./chat/ChatComposer";
 import { createPageScrollController, type PageScrollKey } from "./chat/pageScrollController";
 import { isTimelineScrollTarget } from "./chat/timelineScrollTarget";
 import { DraftHeroHeadline } from "./chat/DraftHeroHeadline";
+import { SandboxLaunchCard } from "./chat/SandboxLaunchCard";
 import { ExpandedImageDialog } from "./chat/ExpandedImageDialog";
 import { PullRequestThreadDialog } from "./PullRequestThreadDialog";
 import type { AssistantCitationRequest } from "./chat/AssistantCitationSource";
@@ -4460,11 +4461,50 @@ export default function ChatView(props: ChatViewProps) {
       worktreePath: null,
     });
   }, [composerHasAttachments, draftId, envLocked, setDraftThreadContext]);
-  const sandboxLabel = sandboxSelected
-    ? sandboxDraftLaunch.launching
-      ? "Creating sandbox…"
-      : "New sandbox"
-    : undefined;
+  const sandboxLabel = sandboxSelected ? "New sandbox" : undefined;
+  /** The message a sandbox launch will send, as it was when the user sent it. */
+  const [sandboxLaunchPrompt, setSandboxLaunchPrompt] = useState("");
+  /** Set while "Run on this machine" waits for the draft to leave sandbox mode. */
+  const pendingLocalSendRef = useRef(false);
+
+  // Creates the sandbox, then moves the draft into it; the queued message is
+  // sent from there once this view targets the sandbox's environment. The
+  // composer keeps the message meanwhile, so nothing is lost on a reload.
+  const startSandboxLaunch = () => {
+    if (!sandboxSelected || !activeProject || !sandboxRepositoryUrl || !draftId) return;
+    if (sandboxDraftLaunch.launching) return;
+    setSandboxLaunchPrompt(promptRef.current);
+    void sandboxDraftLaunch
+      .launch({
+        hostEnvironmentId: environmentId,
+        repositoryUrl: sandboxRepositoryUrl,
+        label: sandboxLabelFromPrompt(promptRef.current),
+        logicalProjectKey: deriveLogicalProjectKeyFromSettings(
+          activeProject,
+          projectGroupingSettings,
+        ),
+        projectGroupingSettings,
+      })
+      .then((target) => {
+        if (!target) return;
+        setDraftThreadContext(draftId, {
+          projectRef: scopeProjectRef(target.environmentId, target.projectId),
+          environmentSelection: "manual",
+          loadBalancedEnvironmentId: null,
+        });
+        pendingSandboxSendRef.current = target.environmentId;
+      });
+  };
+
+  const runSandboxLaunchHere = () => {
+    if (!draftId) return;
+    sandboxDraftLaunch.finish();
+    pendingLocalSendRef.current = true;
+    setDraftThreadContext(draftId, {
+      environmentSelection: "manual",
+      loadBalancedEnvironmentId: null,
+    });
+  };
 
   const activeTerminalGroup =
     terminalUiState.terminalGroups.find(
@@ -8435,30 +8475,8 @@ export default function ChatView(props: ChatViewProps) {
       notifyDirectAnnotationAttached();
       return;
     }
-    if (sandboxSelected && activeProject && sandboxRepositoryUrl && draftId) {
-      // The send restarts from the sandbox once the draft has moved there:
-      // this render's environment and project would still target the host.
-      if (sandboxDraftLaunch.launching) return;
-      void sandboxDraftLaunch
-        .launch({
-          hostEnvironmentId: environmentId,
-          repositoryUrl: sandboxRepositoryUrl,
-          label: sandboxLabelFromPrompt(promptRef.current),
-          logicalProjectKey: deriveLogicalProjectKeyFromSettings(
-            activeProject,
-            projectGroupingSettings,
-          ),
-          projectGroupingSettings,
-        })
-        .then((target) => {
-          if (!target) return;
-          setDraftThreadContext(draftId, {
-            projectRef: scopeProjectRef(target.environmentId, target.projectId),
-            environmentSelection: "manual",
-            loadBalancedEnvironmentId: null,
-          });
-          pendingSandboxSendRef.current = target.environmentId;
-        });
+    if (sandboxSelected) {
+      if (promptRef.current.trim().length > 0) startSandboxLaunch();
       return;
     }
     if (needsLoadBalancing) {
@@ -10175,13 +10193,22 @@ export default function ChatView(props: ChatViewProps) {
   // Finishes a send that first created a sandbox, once the draft has moved
   // into it and this render targets the sandbox's environment and project.
   const resendInSandbox = useEffectEvent(() => {
-    void onSend();
+    void onSend().finally(sandboxDraftLaunch.finish);
   });
   useEffect(() => {
     if (pendingSandboxSendRef.current !== environmentId) return;
     pendingSandboxSendRef.current = null;
     resendInSandbox();
   }, [environmentId]);
+  // "Run on this machine" after a failed launch sends once sandbox mode is off.
+  const sendLocally = useEffectEvent(() => {
+    void onSend();
+  });
+  useEffect(() => {
+    if (sandboxSelected || !pendingLocalSendRef.current) return;
+    pendingLocalSendRef.current = false;
+    sendLocally();
+  }, [sandboxSelected]);
 
   const onImplementPlanInNewThread = useCallback(async () => {
     if (
@@ -11179,7 +11206,16 @@ export default function ChatView(props: ChatViewProps) {
                   data-chat-composer-stack="true"
                   className="group/composer-stack pointer-events-auto relative z-10 mx-auto w-full max-w-(--chat-content-max-width)"
                 >
-                  {isDraftHeroState ? (
+                  {sandboxDraftLaunch.state.phase !== "idle" ? (
+                    <SandboxLaunchCard
+                      state={sandboxDraftLaunch.state}
+                      prompt={sandboxLaunchPrompt}
+                      repositoryName={activeProject?.title ?? null}
+                      onRetry={startSandboxLaunch}
+                      onRunHere={runSandboxLaunchHere}
+                      onEdit={sandboxDraftLaunch.finish}
+                    />
+                  ) : isDraftHeroState ? (
                     <div className="absolute inset-x-0 bottom-full">
                       <div
                         className="pb-4 group-has-data-[composer-shoulder-tab]/composer-stack:pb-0"
@@ -11199,6 +11235,9 @@ export default function ChatView(props: ChatViewProps) {
                   ) : null}
                   <div
                     ref={draftHeroTransition.composerAnchorRef}
+                    // Hidden, not unmounted, while a sandbox launch holds the
+                    // message: the send that follows reads it from the composer.
+                    hidden={sandboxDraftLaunch.state.phase !== "idle"}
                     className="relative z-10"
                     style={
                       forceExpandedMobileComposer

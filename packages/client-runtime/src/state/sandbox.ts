@@ -1,6 +1,5 @@
 import {
   type EnvironmentId,
-  type SandboxCreateInput,
   SandboxNotRunningError,
   type SandboxSummary,
   WS_METHODS,
@@ -121,17 +120,5 @@ export const syncSandboxEnvironments = Effect.fn("clientRuntime.sandbox.syncEnvi
         ),
       { discard: true },
     );
-  },
-);
-
-/** Creates a sandbox on a host and makes it reachable here, returning its environment. */
-export const launchSandboxEnvironment = Effect.fn("clientRuntime.sandbox.launchEnvironment")(
-  function* (hostEnvironmentId: EnvironmentId, input: SandboxCreateInput) {
-    const registry = yield* EnvironmentRegistry.EnvironmentRegistry;
-    const sandbox = yield* registry.run(
-      hostEnvironmentId,
-      request(WS_METHODS.sandboxCreate, input),
-    );
-    return yield* ensureSandboxEnvironment(hostEnvironmentId, sandbox);
   },
 );

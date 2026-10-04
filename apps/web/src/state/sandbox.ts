@@ -1,13 +1,13 @@
 import {
   createSandboxEnvironmentAtoms,
-  launchSandboxEnvironment,
+  ensureSandboxEnvironment,
   syncSandboxEnvironments,
 } from "@t3tools/client-runtime/state/sandbox";
 import {
   createAtomCommandScheduler,
   createRuntimeCommand,
 } from "@t3tools/client-runtime/state/runtime";
-import type { EnvironmentId, SandboxCreateInput } from "@t3tools/contracts";
+import type { EnvironmentId, SandboxSummary } from "@t3tools/contracts";
 
 import { connectionAtomRuntime } from "../connection/runtime";
 
@@ -26,11 +26,11 @@ export const syncSandboxes = createRuntimeCommand(connectionAtomRuntime, {
   execute: (hostEnvironmentId: EnvironmentId) => syncSandboxEnvironments(hostEnvironmentId),
 });
 
-/** Creates a sandbox on a host and registers it, returning its environment. */
-export const launchSandbox = createRuntimeCommand(connectionAtomRuntime, {
-  label: "web:sandbox:launch",
+/** Pairs with a running sandbox and registers it, returning its environment. */
+export const connectSandbox = createRuntimeCommand(connectionAtomRuntime, {
+  label: "web:sandbox:connect",
   execute: (input: {
     readonly hostEnvironmentId: EnvironmentId;
-    readonly sandbox: SandboxCreateInput;
-  }) => launchSandboxEnvironment(input.hostEnvironmentId, input.sandbox),
+    readonly sandbox: SandboxSummary;
+  }) => ensureSandboxEnvironment(input.hostEnvironmentId, input.sandbox),
 });
