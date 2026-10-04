@@ -7,8 +7,9 @@
  *
  * The configured image must start a T3 server on port 7777 and put `t3` on
  * PATH, which pairing uses to mint a credential inside the sandbox. It reads
- * `T3_SANDBOX_LABEL` (the environment's name) and `REPO_URL` (cloned on first
- * start). Every sandbox also starts with the host's `sandboxEnvironment`
+ * `T3_SANDBOX_LABEL` (the environment's name), `REPO_URL` (cloned on first
+ * start), and `T3_ENVIRONMENT_ID` (written as the server's environment id
+ * before its first start, so the host knows it even while the sandbox sleeps). Every sandbox also starts with the host's `sandboxEnvironment`
  * variables, such as an agent login token.
  */
 import {
@@ -117,13 +118,16 @@ const make = Effect.gen(function* () {
     return yield* new SandboxNotFoundError({ id });
   });
 
-  /** A machine with the environment it serves; null while it is still booting. */
+  /**
+   * A machine with the environment it serves. Sandboxes record theirs when
+   * created; older ones are asked, so theirs is null while stopped or booting.
+   */
   const summarize = (
     backend: SandboxBackend,
     machine: SandboxMachine,
   ): Effect.Effect<SandboxSummary> =>
-    machine.httpBaseUrl === null
-      ? Effect.succeed({ ...machine, backend, environmentId: null })
+    machine.environmentId !== null || machine.httpBaseUrl === null
+      ? Effect.succeed({ ...machine, backend })
       : httpClient.get(`${machine.httpBaseUrl}/.well-known/t3/environment`).pipe(
           Effect.flatMap((response) => response.json),
           Effect.flatMap(decodeDescriptor),
@@ -183,10 +187,16 @@ const make = Effect.gen(function* () {
         Effect.mapError((cause) => new SandboxOperationError({ operation: "create", cause })),
       );
       const id = uuid.replaceAll("-", "").slice(0, 12);
+      const environmentId = EnvironmentId.make(
+        yield* crypto.randomUUIDv4.pipe(
+          Effect.mapError((cause) => new SandboxOperationError({ operation: "create", cause })),
+        ),
+      );
       const label = input.label ?? id;
       const backend = current.sandboxBackend;
       yield* drivers[backend].create({
         id,
+        environmentId,
         label,
         image: current.sandboxImage,
         size: current.sandboxSize,
@@ -195,6 +205,7 @@ const make = Effect.gen(function* () {
           ...current.sandboxEnvironment,
           { name: "T3_HOST", value: "0.0.0.0", sensitive: false },
           { name: "T3_SANDBOX_LABEL", value: label, sensitive: false },
+          { name: "T3_ENVIRONMENT_ID", value: environmentId, sensitive: false },
           ...(input.repositoryUrl
             ? [{ name: "REPO_URL", value: input.repositoryUrl, sensitive: false }]
             : []),

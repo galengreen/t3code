@@ -139,9 +139,11 @@ describe("SandboxService", () => {
         image: "sandbox:test",
         state: "running",
         httpBaseUrl: "http://100.64.0.7:49999",
-        environmentId: "env-sandbox",
       });
       expect(created.id).toMatch(/^[0-9a-f]{12}$/);
+      // The host chooses the environment id and the image adopts it, so the
+      // sandbox can be matched to its threads even while it is stopped.
+      expect(created.environmentId).toMatch(/^[0-9a-f-]{36}$/);
       const run = docker.calls.find((args) => args[0] === "run")!;
       expect(run).toEqual(
         expect.arrayContaining([
@@ -152,6 +154,8 @@ describe("SandboxService", () => {
           `t3code.sandbox.id=${created.id}`,
           `t3-sandbox-${created.id}-home:/home/dev`,
           "T3_SANDBOX_LABEL=Fix login",
+          `T3_ENVIRONMENT_ID=${created.environmentId}`,
+          `t3code.sandbox.environment=${created.environmentId}`,
         ]),
       );
       expect((yield* sandboxes.list).map((sandbox) => sandbox.id)).toEqual([created.id]);
@@ -187,7 +191,8 @@ describe("SandboxService", () => {
       const sandboxes = yield* SandboxService.SandboxService;
       const { id } = yield* sandboxes.create({});
       const stopped = yield* sandboxes.stop({ id });
-      expect(stopped).toMatchObject({ state: "stopped", httpBaseUrl: null, environmentId: null });
+      expect(stopped).toMatchObject({ state: "stopped", httpBaseUrl: null });
+      expect(stopped.environmentId).not.toBeNull();
       const paired = yield* sandboxes.pair({ id }).pipe(Effect.flip);
       expect(paired._tag).toBe("SandboxNotRunningError");
       expect((yield* sandboxes.start({ id })).state).toBe("running");

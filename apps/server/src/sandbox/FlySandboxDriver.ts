@@ -13,6 +13,7 @@
  * Fly runs `exec` as root, so commands are run as the image's `dev` user.
  */
 import {
+  EnvironmentId,
   SandboxNotFoundError,
   SandboxOperationError,
   SandboxUnavailableError,
@@ -126,6 +127,9 @@ const toMachine = (app: string, machine: MachineSummary): SandboxMachine | null 
   return {
     id,
     label: machine.config?.metadata?.t3code_sandbox_label ?? id,
+    environmentId: machine.config?.metadata?.t3code_sandbox_environment
+      ? EnvironmentId.make(machine.config.metadata.t3code_sandbox_environment)
+      : null,
     image: machine.config?.image ?? "",
     state,
     createdAt: machine.created_at ?? "",
@@ -385,7 +389,11 @@ export const make = Effect.gen(function* () {
           guest: GUESTS[spec.size],
           rootfs: { persist: "always" },
           restart: { policy: "on-failure", max_retries: 3 },
-          metadata: { t3code_sandbox: "1", t3code_sandbox_label: spec.label },
+          metadata: {
+            t3code_sandbox: "1",
+            t3code_sandbox_label: spec.label,
+            t3code_sandbox_environment: spec.environmentId,
+          },
           services: [
             {
               protocol: "tcp",

@@ -29,7 +29,10 @@ export const SandboxSummary = Schema.Struct({
   createdAt: Schema.String,
   /** The sandbox server's origin at the host's publish address, while running. */
   httpBaseUrl: Schema.NullOr(Schema.String),
-  /** The sandbox server's environment, once it answers. Stable across restarts. */
+  /**
+   * The sandbox server's environment, stable across restarts. Known from
+   * creation; null only for older sandboxes that are stopped or still booting.
+   */
   environmentId: Schema.NullOr(EnvironmentId),
 });
 export type SandboxSummary = typeof SandboxSummary.Type;

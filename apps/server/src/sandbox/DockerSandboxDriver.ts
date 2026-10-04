@@ -14,6 +14,7 @@
  * arguments, so they never appear in the host's process list.
  */
 import {
+  EnvironmentId,
   SandboxNotFoundError,
   SandboxOperationError,
   SandboxUnavailableError,
@@ -36,6 +37,7 @@ import type {
 const SANDBOX_LABEL = "t3code.sandbox";
 const SANDBOX_ID_LABEL = "t3code.sandbox.id";
 const SANDBOX_NAME_LABEL = "t3code.sandbox.label";
+const SANDBOX_ENVIRONMENT_LABEL = "t3code.sandbox.environment";
 const SANDBOX_PORT = "7777/tcp";
 
 /** Docker has no dedicated CPUs, so large gets more of them instead. */
@@ -77,6 +79,9 @@ const sandboxState = (status: string): SandboxState =>
       ? "failed"
       : "stopped";
 
+const recordedEnvironmentId = (value: string | undefined) =>
+  value ? EnvironmentId.make(value) : null;
+
 /** URL host form of an address: IPv6 literals need brackets. */
 const urlHost = (address: string) => (address.includes(":") ? `[${address}]` : address);
 
@@ -93,6 +98,7 @@ const toMachine = (
   return {
     id,
     label: labels[SANDBOX_NAME_LABEL] ?? id,
+    environmentId: recordedEnvironmentId(labels[SANDBOX_ENVIRONMENT_LABEL]),
     image: container.Config.Image,
     state,
     createdAt: container.Created,
@@ -170,7 +176,7 @@ export const make = Effect.gen(function* () {
   return {
     list: inspect(`${SANDBOX_LABEL}=1`, "list"),
     find,
-    create: ({ id, label, image, size, environment }) =>
+    create: ({ id, environmentId, label, image, size, environment }) =>
       Effect.gen(function* () {
         const host = yield* publishHost;
         const env = environmentArgs(environment);
@@ -186,6 +192,8 @@ export const make = Effect.gen(function* () {
             `${SANDBOX_ID_LABEL}=${id}`,
             "--label",
             `${SANDBOX_NAME_LABEL}=${label}`,
+            "--label",
+            `${SANDBOX_ENVIRONMENT_LABEL}=${environmentId}`,
             "--hostname",
             containerName(id),
             "--cpus",

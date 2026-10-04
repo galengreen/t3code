@@ -10,6 +10,7 @@
  * the user switched backends can still be listed, stopped, and removed.
  */
 import type {
+  EnvironmentId,
   SandboxBackend,
   SandboxError,
   SandboxId,
@@ -28,6 +29,11 @@ export interface SandboxMachine {
   readonly image: string;
   readonly state: SandboxState;
   readonly createdAt: string;
+  /**
+   * The environment the sandbox's server serves, recorded when it was created;
+   * null for sandboxes made before it was recorded.
+   */
+  readonly environmentId: EnvironmentId | null;
   /** Where clients reach the sandbox's T3 server, while it runs. */
   readonly httpBaseUrl: string | null;
 }
@@ -41,6 +47,7 @@ export interface SandboxVariable {
 
 export interface SandboxMachineSpec {
   readonly id: SandboxId;
+  readonly environmentId: EnvironmentId;
   readonly label: string;
   readonly image: string;
   readonly size: SandboxSize;

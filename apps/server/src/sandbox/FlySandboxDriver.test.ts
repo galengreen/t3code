@@ -1,4 +1,5 @@
 import { describe, expect, it } from "@effect/vitest";
+import { EnvironmentId } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import { HttpClient, HttpClientResponse, UrlParams } from "effect/unstable/http";
@@ -113,6 +114,7 @@ const run = <A, E>(
 
 const spec = {
   id: "abc123def456",
+  environmentId: EnvironmentId.make("2f6c0c1e-9d0a-4b7e-8f53-1f0c2a7d9b10"),
   label: "Fix login",
   image: "registry.fly.io/t3-sandbox:latest",
   size: "small" as const,
@@ -151,6 +153,7 @@ describe("FlySandboxDriver", () => {
             image: spec.image,
             state: "running",
             createdAt: "2026-10-04T00:00:00Z",
+            environmentId: spec.environmentId,
             httpBaseUrl: "https://t3-sbx-abc123def456.fly.dev",
           },
         ]);
