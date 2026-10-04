@@ -73,6 +73,14 @@ export type SandboxRegistrationAction =
   | { readonly kind: "update"; readonly httpBaseUrl: string; readonly label: string }
   | { readonly kind: "none" };
 
+const sameOrigin = (left: string, right: string) => {
+  try {
+    return new URL(left).href === new URL(right).href;
+  } catch {
+    return left === right;
+  }
+};
+
 export function sandboxRegistrationAction(
   entry: Pick<ConnectionCatalogEntry, "profile" | "target"> | undefined,
   httpBaseUrl: string,
@@ -82,7 +90,9 @@ export function sandboxRegistrationAction(
     onNone: () => null,
     onSome: (profile) => ("httpBaseUrl" in profile ? profile.httpBaseUrl : null),
   });
-  return savedBaseUrl !== null && savedBaseUrl !== httpBaseUrl
+  // Saved profiles keep the trailing slash URL parsing adds; comparing raw
+  // strings would reconnect a healthy sandbox on every sync.
+  return savedBaseUrl !== null && !sameOrigin(savedBaseUrl, httpBaseUrl)
     ? { kind: "update", httpBaseUrl, label: entry.target.label }
     : { kind: "none" };
 }

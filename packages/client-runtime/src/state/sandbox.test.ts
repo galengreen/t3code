@@ -33,6 +33,15 @@ describe("sandboxRegistrationAction", () => {
     ).toEqual({ kind: "update", httpBaseUrl: "http://100.64.0.7:32771", label: "Fix login" });
   });
 
+  it("does not reconnect a sandbox whose saved address only adds a trailing slash", () => {
+    expect(
+      sandboxRegistrationAction(
+        bearerEntry("https://t3-sbx-abc.fly.dev/"),
+        "https://t3-sbx-abc.fly.dev",
+      ),
+    ).toEqual({ kind: "none" });
+  });
+
   it("leaves an up-to-date or non-bearer connection alone", () => {
     expect(
       sandboxRegistrationAction(bearerEntry("http://100.64.0.7:32770"), "http://100.64.0.7:32770"),
