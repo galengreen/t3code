@@ -56,7 +56,7 @@ const DockerContainer = Schema.Struct({
     Image: Schema.String,
     Labels: Schema.NullOr(Schema.Record(Schema.String, Schema.String)),
   }),
-  State: Schema.Struct({ Status: Schema.String }),
+  State: Schema.Struct({ Status: Schema.String, FinishedAt: Schema.optional(Schema.String) }),
   NetworkSettings: Schema.Struct({
     Ports: Schema.NullOr(
       Schema.Record(
@@ -102,6 +102,11 @@ const toMachine = (
     image: container.Config.Image,
     state,
     createdAt: container.Created,
+    // Docker reports the zero time for containers that never stopped.
+    stoppedAt:
+      state === "running" || !container.State.FinishedAt?.startsWith("2")
+        ? null
+        : container.State.FinishedAt,
     httpBaseUrl: state === "running" && port ? `http://${urlHost(publishHost)}:${port}` : null,
   };
 };

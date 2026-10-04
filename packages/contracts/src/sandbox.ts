@@ -27,6 +27,8 @@ export const SandboxSummary = Schema.Struct({
   image: Schema.String,
   state: SandboxState,
   createdAt: Schema.String,
+  /** When a stopped sandbox stopped; null while running. */
+  stoppedAt: Schema.NullOr(Schema.String),
   /** Where clients reach the sandbox's server, once it answers; null while stopped or booting. */
   httpBaseUrl: Schema.NullOr(Schema.String),
   /**

@@ -29,6 +29,8 @@ export interface SandboxMachine {
   readonly image: string;
   readonly state: SandboxState;
   readonly createdAt: string;
+  /** When a stopped machine stopped, for deleting long-stopped sandboxes; null otherwise. */
+  readonly stoppedAt: string | null;
   /**
    * The environment the sandbox's server serves, recorded when it was created;
    * null for sandboxes made before it was recorded.

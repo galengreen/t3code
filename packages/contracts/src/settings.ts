@@ -6,6 +6,7 @@ import * as SchemaTransformation from "effect/SchemaTransformation";
 import {
   ForwardCompatibleNullable,
   ForwardCompatibleOptional,
+  NonNegativeInt,
   OmittedWhenNull,
   ProjectId,
   TrimmedNonEmptyString,
@@ -1321,6 +1322,17 @@ export const ServerSettings = Schema.Struct({
   sandboxBackend: SandboxBackend.pipe(Schema.withDecodingDefault(Effect.succeed("docker"))),
   sandboxSize: SandboxSize.pipe(Schema.withDecodingDefault(Effect.succeed("small"))),
   sandboxFly: SandboxFlySettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
+  /**
+   * Minutes a sandbox may sit with no agent working and no client using it
+   * before it stops itself; 0 keeps it running. Applies to sandboxes created
+   * afterwards.
+   */
+  sandboxSleepAfterMinutes: NonNegativeInt.pipe(Schema.withDecodingDefault(Effect.succeed(20))),
+  /**
+   * Days a sandbox may stay stopped before the host deletes it, files and
+   * unpushed changes included; 0 keeps stopped sandboxes.
+   */
+  sandboxDeleteAfterDays: NonNegativeInt.pipe(Schema.withDecodingDefault(Effect.succeed(14))),
   sidebarAutoSettleAfterDays: Schema.NullOr(SidebarAutoSettleAfterDays).pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_SIDEBAR_AUTO_SETTLE_AFTER_DAYS)),
   ),
@@ -1688,6 +1700,8 @@ export const ServerSettingsPatch = Schema.Struct({
   sandboxEnvironment: Schema.optionalKey(ProviderInstanceEnvironment),
   sandboxBackend: Schema.optionalKey(SandboxBackend),
   sandboxSize: Schema.optionalKey(SandboxSize),
+  sandboxSleepAfterMinutes: Schema.optionalKey(NonNegativeInt),
+  sandboxDeleteAfterDays: Schema.optionalKey(NonNegativeInt),
   sandboxFly: Schema.optionalKey(
     Schema.Struct({
       apiToken: Schema.optionalKey(TrimmedString),

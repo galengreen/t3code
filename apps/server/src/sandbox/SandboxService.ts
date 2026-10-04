@@ -29,8 +29,10 @@ import {
   type SandboxSummary,
 } from "@t3tools/contracts";
 import { waitForHttpReady } from "@t3tools/shared/httpReadiness";
+import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
@@ -63,6 +65,11 @@ export class SandboxService extends Context.Service<
     readonly remove: (input: SandboxIdInput) => Effect.Effect<void, SandboxError>;
     /** Mints a one-time pairing credential inside a running sandbox. */
     readonly pair: (input: SandboxIdInput) => Effect.Effect<SandboxPairing, SandboxError>;
+    /**
+     * Deletes sandboxes that have been stopped longer than the
+     * `sandboxDeleteAfterDays` setting allows, returning their ids.
+     */
+    readonly pruneStopped: Effect.Effect<ReadonlyArray<SandboxId>, SandboxError>;
     /** What a Fly token (the given one, else the saved one) can reach. */
     readonly flyAccount: (
       input: SandboxFlyAccountInput,
@@ -211,6 +218,15 @@ const make = Effect.gen(function* () {
           { name: "T3_HOST", value: "0.0.0.0", sensitive: false },
           { name: "T3_SANDBOX_LABEL", value: label, sensitive: false },
           { name: "T3_ENVIRONMENT_ID", value: environmentId, sensitive: false },
+          ...(current.sandboxSleepAfterMinutes > 0
+            ? [
+                {
+                  name: "T3CODE_EXIT_WHEN_IDLE_MINUTES",
+                  value: String(current.sandboxSleepAfterMinutes),
+                  sensitive: false,
+                },
+              ]
+            : []),
           ...(input.repositoryUrl
             ? [{ name: "REPO_URL", value: input.repositoryUrl, sensitive: false }]
             : []),
@@ -277,7 +293,57 @@ const make = Effect.gen(function* () {
     return yield* flyAccount(token).pipe(Effect.provideService(HttpClient.HttpClient, httpClient));
   });
 
-  return SandboxService.of({ list, create, start, stop, remove, pair, flyAccount: flyAccountOf });
+  const pruneStopped: SandboxService["Service"]["pruneStopped"] = Effect.gen(function* () {
+    const { sandboxDeleteAfterDays } = yield* ensureAvailable;
+    if (sandboxDeleteAfterDays === 0) return [];
+    const cutoff =
+      (yield* Clock.currentTimeMillis) - Duration.toMillis(Duration.days(sandboxDeleteAfterDays));
+    const removed: SandboxId[] = [];
+    for (const backend of BACKENDS) {
+      // A backend that cannot be listed (Fly without a token) has nothing to prune.
+      const machines = yield* drivers[backend].list.pipe(Effect.orElseSucceed(() => []));
+      for (const machine of machines) {
+        const stoppedAt = machine.stoppedAt === null ? NaN : Date.parse(machine.stoppedAt);
+        if (machine.state !== "stopped" || !(stoppedAt < cutoff)) continue;
+        yield* drivers[backend].remove(machine.id);
+        yield* Effect.logInfo("Deleted a long-stopped sandbox", {
+          id: machine.id,
+          label: machine.label,
+          stoppedAt: machine.stoppedAt,
+        });
+        removed.push(machine.id);
+      }
+    }
+    return removed;
+  }).pipe(Effect.withSpan("SandboxService.pruneStopped"));
+
+  return SandboxService.of({
+    list,
+    create,
+    start,
+    stop,
+    remove,
+    pair,
+    pruneStopped,
+    flyAccount: flyAccountOf,
+  });
 });
 
 export const layer = Layer.effect(SandboxService, make);
+
+/**
+ * Prunes long-stopped sandboxes an hour after start and hourly after that.
+ * Quietly does nothing on servers with sandboxes turned off.
+ */
+export const pruneLayer = Layer.effectDiscard(
+  Effect.gen(function* () {
+    const sandboxes = yield* SandboxService;
+    yield* sandboxes.pruneStopped.pipe(
+      Effect.catchTag("SandboxUnavailableError", () => Effect.succeed([])),
+      Effect.catchCause((cause) => Effect.logWarning("Sandbox pruning failed", { cause })),
+      Effect.delay(Duration.hours(1)),
+      Effect.forever,
+      Effect.forkScoped,
+    );
+  }),
+);

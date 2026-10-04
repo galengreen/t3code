@@ -64,6 +64,7 @@ const MachineSummary = Schema.Struct({
   id: Schema.String,
   state: Schema.String,
   created_at: Schema.optional(Schema.String),
+  updated_at: Schema.optional(Schema.String),
   app_name: Schema.optional(Schema.String),
   config: Schema.optional(
     Schema.Struct({
@@ -133,6 +134,7 @@ const toMachine = (app: string, machine: MachineSummary): SandboxMachine | null 
     image: machine.config?.image ?? "",
     state,
     createdAt: machine.created_at ?? "",
+    stoppedAt: state === "stopped" ? (machine.updated_at ?? null) : null,
     httpBaseUrl: state === "running" ? `https://${app}.fly.dev` : null,
   };
 };
@@ -388,7 +390,9 @@ export const make = Effect.gen(function* () {
           ),
           guest: GUESTS[spec.size],
           rootfs: { persist: "always" },
-          restart: { policy: "on-failure", max_retries: 3 },
+          // The sandbox's server exits when it has been idle, which must stop
+          // the machine rather than restart it.
+          restart: { policy: "no" },
           metadata: {
             t3code_sandbox: "1",
             t3code_sandbox_label: spec.label,
@@ -398,7 +402,9 @@ export const make = Effect.gen(function* () {
             {
               protocol: "tcp",
               internal_port: SANDBOX_PORT,
-              autostart: true,
+              // A sleeping sandbox wakes when asked through the host, not when
+              // a client that is still open reconnects to it.
+              autostart: false,
               autostop: "off",
               ports: [
                 { port: 443, handlers: ["tls", "http"] },

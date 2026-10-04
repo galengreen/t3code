@@ -1,6 +1,7 @@
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
+import * as TestClock from "effect/testing/TestClock";
 import * as Layer from "effect/Layer";
 import { HttpClient, HttpClientResponse } from "effect/unstable/http";
 
@@ -13,6 +14,7 @@ interface FakeContainer {
   readonly labels: Record<string, string>;
   readonly image: string;
   status: string;
+  finishedAt?: string;
 }
 
 /** A tiny Docker that understands the commands the service issues. */
@@ -20,6 +22,7 @@ const fakeDocker = () => {
   const containers = new Map<string, FakeContainer>();
   const volumes = new Set<string>();
   const calls: string[][] = [];
+  let stopTime = "2026-10-01T00:00:00Z";
   const envs: Array<NodeJS.ProcessEnv | undefined> = [];
   const output = (stdout: string, code = 0, stderr = "") => ({
     stdout,
@@ -34,7 +37,7 @@ const fakeDocker = () => {
   const inspectJson = (name: string, container: FakeContainer) => ({
     Created: "2026-10-03T00:00:00Z",
     Config: { Image: container.image, Labels: container.labels },
-    State: { Status: container.status },
+    State: { Status: container.status, FinishedAt: container.finishedAt ?? "0001-01-01T00:00:00Z" },
     NetworkSettings: {
       Ports: {
         "7777/tcp":
@@ -73,9 +76,12 @@ const fakeDocker = () => {
       case "start":
         containers.get(rest[0]!)!.status = "running";
         return output("");
-      case "stop":
-        containers.get(rest.at(-1)!)!.status = "exited";
+      case "stop": {
+        const container = containers.get(rest.at(-1)!)!;
+        container.status = "exited";
+        container.finishedAt = stopTime;
         return output("");
+      }
       case "rm":
         containers.delete(rest.at(-1)!);
         return output("");
@@ -90,7 +96,16 @@ const fakeDocker = () => {
         return output("", 1, `unexpected docker ${command}`);
     }
   };
-  return { containers, volumes, calls, envs, run };
+  return {
+    containers,
+    volumes,
+    calls,
+    envs,
+    run,
+    stopAt: (time: string) => {
+      stopTime = time;
+    },
+  };
 };
 
 const serviceLayer = (
@@ -248,6 +263,28 @@ describe("SandboxService", () => {
       serving = true;
       expect((yield* sandboxes.list)[0]?.httpBaseUrl).toBe("http://100.64.0.7:49999");
     }).pipe(Effect.provide(layer));
+  });
+
+  it.effect("deletes sandboxes stopped longer than the setting allows, and no others", () => {
+    const docker = fakeDocker();
+    return Effect.gen(function* () {
+      const sandboxes = yield* SandboxService.SandboxService;
+      const old = yield* sandboxes.create({ label: "old" });
+      const recent = yield* sandboxes.create({ label: "recent" });
+      const running = yield* sandboxes.create({ label: "running" });
+      docker.stopAt("2026-10-01T00:00:00Z");
+      yield* sandboxes.stop({ id: old.id });
+      docker.stopAt("2026-10-18T00:00:00Z");
+      yield* sandboxes.stop({ id: recent.id });
+      yield* TestClock.setTime(Date.parse("2026-10-20T00:00:00Z"));
+
+      expect(yield* sandboxes.pruneStopped).toEqual([old.id]);
+      expect((yield* sandboxes.list).map((sandbox) => sandbox.label).toSorted()).toEqual([
+        "recent",
+        "running",
+      ]);
+      expect(running.state).toBe("running");
+    }).pipe(Effect.provide(serviceLayer(docker)));
   });
 
   it.effect("reports unknown sandboxes and ignores containers it did not create", () => {

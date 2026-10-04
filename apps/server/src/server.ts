@@ -70,6 +70,7 @@ import * as DeviceService from "./device/DeviceService.ts";
 import { deviceHubProxyRouteLayer } from "./device/DeviceHubProxy.ts";
 import * as DesktopStreamer from "./device/DesktopStreamer.ts";
 import * as SandboxDrivers from "./sandbox/SandboxDrivers.ts";
+import * as IdleShutdown from "./sandbox/IdleShutdown.ts";
 import * as SandboxService from "./sandbox/SandboxService.ts";
 import * as PreviewManager from "./preview/Manager.ts";
 import * as PortScanner from "./preview/PortScanner.ts";
@@ -1032,10 +1033,13 @@ const makeServerLayer = Layer.unwrap(
       tailscaleServeLayer,
       cloudDesiredLinkReconcileLayer,
       HeapSnapshot.layer,
+      IdleShutdown.layer,
+      SandboxService.pruneLayer,
     );
 
     return serverApplicationLayer.pipe(
       Layer.provideMerge(runtimeServicesLive),
+      Layer.provideMerge(IdleShutdown.clientActivityLayer),
       Layer.provideMerge(
         McpSessionRegistry.layer.pipe(
           Layer.provide(ServerEnvironment.layer.pipe(Layer.provide(ServerSecretStore.layer))),

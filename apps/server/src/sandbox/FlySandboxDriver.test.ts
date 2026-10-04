@@ -141,6 +141,8 @@ describe("FlySandboxDriver", () => {
             image: spec.image,
             env: { REPO_URL: "https://github.com/example/app.git" },
             guest: { cpu_kind: "shared", cpus: 2, memory_mb: 2048 },
+            restart: { policy: "no" },
+            services: [expect.objectContaining({ autostart: false, autostop: "off" })],
           },
         });
         expect(toJson(create.body)).not.toContain("sk-ant-oat-secret");
@@ -153,6 +155,7 @@ describe("FlySandboxDriver", () => {
             image: spec.image,
             state: "running",
             createdAt: "2026-10-04T00:00:00Z",
+            stoppedAt: null,
             environmentId: spec.environmentId,
             httpBaseUrl: "https://t3-sbx-abc123def456.fly.dev",
           },
