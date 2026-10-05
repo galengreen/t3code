@@ -11462,7 +11462,12 @@ export default function ChatView(props: ChatViewProps) {
                               showPlanFollowUpPrompt={showPlanFollowUpPrompt}
                               activeProposedPlan={activeProposedPlan}
                               threadSyncPhase={
-                                activeEnvironmentUnavailable ? null : threadSyncPhase
+                                // An idle environment that connects when needed (a
+                                // sleeping sandbox) is not syncing; it will when used.
+                                activeEnvironmentUnavailable ||
+                                activeEnvironmentConnectionPhase === "available"
+                                  ? null
+                                  : threadSyncPhase
                               }
                               runtimeMode={runtimeMode}
                               interactionMode={interactionMode}
