@@ -7,7 +7,8 @@ import { HttpClient, HttpClientResponse } from "effect/unstable/http";
 
 import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
 import * as ServerSettings from "../serverSettings.ts";
-import { CubeDrivers, type CubeDriver, type CubeMachine } from "./CubeDriver.ts";
+import { CubeDrivers, type CubeMachine } from "./CubeDriver.ts";
+import type { FlyCubeDriver } from "./FlyCubeDriver.ts";
 import * as CubeUsage from "./CubeUsage.ts";
 import { BUILT_IN_RATES, usdPerSecond } from "./flyPricing.ts";
 
@@ -28,7 +29,7 @@ const machine = (id: string, overrides: Partial<CubeMachine> = {}): CubeMachine 
 });
 
 const driver = (machines: () => ReadonlyArray<CubeMachine>) =>
-  ({ list: Effect.sync(machines) }) as unknown as CubeDriver;
+  ({ list: Effect.sync(machines) }) as unknown as FlyCubeDriver;
 
 const usageLayer = (options: {
   readonly docker: () => ReadonlyArray<CubeMachine>;

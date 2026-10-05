@@ -29,7 +29,7 @@ export function CubeEnvironmentSync() {
             serverConfigs.get(environment.environmentId)?.settings.enableCubes === true,
         )
         .map((environment) => environment.environmentId)
-        .toSorted()
+        .sort()
         .join(","),
     [connectedEnvironments, serverConfigs],
   );
