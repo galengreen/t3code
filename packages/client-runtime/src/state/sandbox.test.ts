@@ -94,22 +94,33 @@ describe("findSandboxByEnvironment", () => {
 });
 
 describe("sandboxConnectionChange", () => {
-  const serving = { state: "running" as const, httpBaseUrl: "https://t3-sbx-abc.fly.dev" };
-  const booting = { state: "running" as const, httpBaseUrl: null };
-  const asleep = { state: "stopped" as const, httpBaseUrl: null };
+  const docker = { backend: "docker" as const };
+  const serving = { ...docker, state: "running" as const, httpBaseUrl: "http://nas:49999" };
+  const booting = { ...docker, state: "running" as const, httpBaseUrl: null };
+  const asleep = { ...docker, state: "stopped" as const, httpBaseUrl: null };
 
-  it("switches a sleeping sandbox's connection off so the client stops retrying it", () => {
-    expect(sandboxConnectionChange({ enabled: true }, asleep)).toBe("disable");
-    expect(sandboxConnectionChange({ enabled: false }, asleep)).toBe("none");
+  it("switches a sleeping Docker sandbox's connection off so the client stops retrying it", () => {
+    expect(sandboxConnectionChange({ enabled: true }, asleep)).toEqual({ enabled: false });
+    expect(sandboxConnectionChange({ enabled: false }, asleep)).toEqual({});
   });
 
   it("switches it back on once the sandbox serves again, whoever woke it", () => {
-    expect(sandboxConnectionChange({ enabled: false }, serving)).toBe("enable");
-    expect(sandboxConnectionChange({ enabled: false }, booting)).toBe("none");
-    expect(sandboxConnectionChange({ enabled: true }, serving)).toBe("none");
+    expect(sandboxConnectionChange({ enabled: false }, serving)).toEqual({ enabled: true });
+    expect(sandboxConnectionChange({ enabled: false }, booting)).toEqual({});
+    expect(sandboxConnectionChange({ enabled: true }, serving)).toEqual({});
+  });
+
+  it("keeps a Fly sandbox switched on and connecting only when needed, asleep or not", () => {
+    const fly = { backend: "fly" as const, state: "stopped" as const, httpBaseUrl: null };
+    expect(sandboxConnectionChange({ enabled: true, connectWhen: "needed" }, fly)).toEqual({});
+    // Saved by an older client that switched sleeping sandboxes off.
+    expect(sandboxConnectionChange({ enabled: false }, fly)).toEqual({
+      connectWhen: "needed",
+      enabled: true,
+    });
   });
 
   it("leaves sandboxes this client never registered alone", () => {
-    expect(sandboxConnectionChange(undefined, asleep)).toBe("none");
+    expect(sandboxConnectionChange(undefined, asleep)).toEqual({});
   });
 });

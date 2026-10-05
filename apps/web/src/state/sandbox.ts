@@ -1,3 +1,4 @@
+import { EnvironmentRegistry } from "@t3tools/client-runtime/connection";
 import {
   changeSandboxEnvironment,
   createSandboxEnvironmentAtoms,
@@ -129,5 +130,14 @@ export const connectSandbox = createRuntimeCommand(connectionAtomRuntime, {
   execute: (input: {
     readonly hostEnvironmentId: EnvironmentId;
     readonly sandbox: SandboxSummary;
-  }) => ensureSandboxEnvironment(input.hostEnvironmentId, input.sandbox),
+  }) =>
+    ensureSandboxEnvironment(input.hostEnvironmentId, input.sandbox).pipe(
+      // A sandbox that connects only when needed is not connected by
+      // registering it; the launch needs it now.
+      Effect.tap((environmentId) =>
+        EnvironmentRegistry.EnvironmentRegistry.pipe(
+          Effect.flatMap((registry) => registry.ensureConnected(environmentId, "60 seconds")),
+        ),
+      ),
+    ),
 });

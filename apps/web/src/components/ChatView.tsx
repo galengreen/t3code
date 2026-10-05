@@ -2612,8 +2612,31 @@ export default function ChatView(props: ChatViewProps) {
   const activeEnvironment =
     activeThread == null ? null : (environmentById.get(activeThread.environmentId) ?? null);
   const activeEnvironmentConnectionPhase = activeEnvironment?.connection.phase ?? "available";
+  // An environment that connects when needed (a sandbox) is not connected
+  // while idle; using it connects, so only a real failure makes it unavailable.
+  const activeEnvironmentConnectsWhenNeeded =
+    activeEnvironment?.entry.connectWhen === "needed" &&
+    (activeEnvironmentConnectionPhase === "available" ||
+      activeEnvironmentConnectionPhase === "connecting" ||
+      activeEnvironmentConnectionPhase === "reconnecting");
   const activeEnvironmentUnavailable =
-    activeEnvironment !== null && activeEnvironmentConnectionPhase !== "connected";
+    activeEnvironment !== null &&
+    activeEnvironmentConnectionPhase !== "connected" &&
+    !activeEnvironmentConnectsWhenNeeded;
+  // Opening a thread is a need: connect its environment if it connects only
+  // when needed. Once per arrival, so a sandbox put to sleep while the thread
+  // is open stays asleep until the user acts. A stopped sandbox is woken
+  // through its host above instead.
+  const connectEnvironment = useAtomCommand(environmentCatalog.connect, { reportFailure: false });
+  const arrivedOnDemandEnvironmentRef = useRef<EnvironmentId | null>(null);
+  useEffect(() => {
+    if (!isServerThread || activeEnvironment?.entry.connectWhen !== "needed") return;
+    if (arrivedOnDemandEnvironmentRef.current === activeEnvironment.environmentId) return;
+    arrivedOnDemandEnvironmentRef.current = activeEnvironment.environmentId;
+    if (activeEnvironment.connection.phase !== "available") return;
+    if (activeSandbox?.sandbox.state === "stopped") return;
+    void connectEnvironment(activeEnvironment.environmentId);
+  }, [activeEnvironment, activeSandbox, connectEnvironment, isServerThread]);
   const activeReconnectingEnvironmentId =
     activeEnvironmentConnectionPhase === "connecting" ||
     activeEnvironmentConnectionPhase === "reconnecting"

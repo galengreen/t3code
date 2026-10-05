@@ -133,6 +133,9 @@ describe("createAssetEnvironmentAtoms", () => {
         );
       }
       const environments = EnvironmentRegistry.EnvironmentRegistry.of({
+        entries: (yield* SubscriptionRef.make(
+          new Map(),
+        )) as unknown as EnvironmentRegistry.EnvironmentRegistry["Service"]["entries"],
         run: (id, effect) =>
           Effect.provideService(
             effect,

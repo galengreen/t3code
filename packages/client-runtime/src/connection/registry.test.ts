@@ -19,6 +19,7 @@ import * as Scheduler from "effect/Scheduler";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 import * as SubscriptionRef from "effect/SubscriptionRef";
+import { TestClock } from "effect/testing";
 
 import * as ClientCapabilities from "../platform/capabilities.ts";
 import * as TokenStore from "../authorization/tokenStore.ts";
@@ -142,7 +143,7 @@ const makeHarness = Effect.fn("TestEnvironmentRegistry.makeHarness")(function* (
   initialProfiles: ReadonlyArray<ConnectionProfile> = [],
   initialCredentials: ReadonlyArray<readonly [string, ConnectionCredential]> = [],
   options?: {
-    readonly prepareError?: ConnectionBlockedError;
+    readonly prepareError?: ConnectionBlockedError | ConnectionTransientError;
     readonly beforeSessionConnect?: (environmentId: EnvironmentId) => Effect.Effect<void>;
     readonly beforeRegistrationRegister?: (
       registration: ConnectionRegistration,
@@ -151,6 +152,7 @@ const makeHarness = Effect.fn("TestEnvironmentRegistry.makeHarness")(function* (
       target: ConnectionTarget,
     ) => Effect.Effect<void, Persistence.ConnectionPersistenceError>;
     readonly initialDisabled?: ReadonlyArray<EnvironmentId>;
+    readonly initialOnDemand?: ReadonlyArray<EnvironmentId>;
   },
 ) {
   const storedTargets = yield* Ref.make(
@@ -190,9 +192,13 @@ const makeHarness = Effect.fn("TestEnvironmentRegistry.makeHarness")(function* (
   const storedDisabled = yield* Ref.make<ReadonlySet<EnvironmentId>>(
     new Set(options?.initialDisabled ?? []),
   );
+  const storedOnDemand = yield* Ref.make<ReadonlySet<EnvironmentId>>(
+    new Set(options?.initialOnDemand ?? []),
+  );
   const targetStore = Persistence.ConnectionTargetStore.of({
     list: Ref.get(storedTargets).pipe(Effect.map((targets) => [...targets.values()])),
     listDisabled: Ref.get(storedDisabled).pipe(Effect.map((ids) => [...ids])),
+    listOnDemand: Ref.get(storedOnDemand).pipe(Effect.map((ids) => [...ids])),
   });
   const registrationStore = Persistence.ConnectionRegistrationStore.of({
     register: (registration) =>
@@ -260,6 +266,13 @@ const makeHarness = Effect.fn("TestEnvironmentRegistry.makeHarness")(function* (
         } else {
           next.add(environmentId);
         }
+        return next;
+      }),
+    setConnectWhen: (environmentId, connectWhen) =>
+      Ref.update(storedOnDemand, (current) => {
+        const next = new Set(current);
+        if (connectWhen === "needed") next.add(environmentId);
+        else next.delete(environmentId);
         return next;
       }),
   });
@@ -1578,6 +1591,110 @@ describe("EnvironmentRegistry", () => {
           false,
         );
         expect(yield* Ref.get(harness.disconnectedSshTargets)).toEqual([SSH_TARGET]);
+      }).pipe(Effect.provide(harness.layer));
+    }),
+  );
+});
+
+describe("EnvironmentRegistry environments that connect when needed", () => {
+  const onDemand = { initialOnDemand: [TARGET.environmentId] };
+  const drop = (closed: Deferred.Deferred<never, ConnectionTransientError>) =>
+    Deferred.fail(closed, new ConnectionTransientError({ reason: "transport", detail: "Gone." }));
+
+  it.effect("stays disconnected at launch and connects when something needs it", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness([TARGET], [], [], onDemand);
+      yield* Effect.gen(function* () {
+        const registry = yield* EnvironmentRegistry.EnvironmentRegistry;
+        yield* registry.start;
+        expect(yield* registry.state(TARGET.environmentId)).toMatchObject({
+          desired: false,
+          phase: "available",
+        });
+        expect(yield* Ref.get(harness.sessions)).toHaveLength(0);
+
+        yield* registry.ensureConnected(TARGET.environmentId, "5 seconds");
+        expect((yield* registry.state(TARGET.environmentId)).phase).toBe("connected");
+        expect(yield* Ref.get(harness.sessions)).toHaveLength(1);
+      }).pipe(Effect.provide(harness.layer));
+    }),
+  );
+
+  it.effect("leaves a dropped connection closed, unless its agent was working", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness([TARGET], [], [], onDemand);
+      yield* Effect.gen(function* () {
+        const registry = yield* EnvironmentRegistry.EnvironmentRegistry;
+        yield* registry.start;
+        yield* registry.ensureConnected(TARGET.environmentId, "5 seconds");
+        // Long after it was needed, the machine goes to sleep.
+        yield* TestClock.adjust("2 minutes");
+        yield* drop((yield* Ref.get(harness.sessions))[0]!.closed);
+        yield* awaitConnectionState(registry, TARGET.environmentId, (state) => !state.desired);
+        yield* TestClock.adjust("10 minutes");
+        expect(yield* Ref.get(harness.sessions)).toHaveLength(1);
+
+        // Seeing work in progress (from the cache) follows it once.
+        yield* registry.setActiveWork(TARGET.environmentId, true);
+        yield* awaitConnectionState(
+          registry,
+          TARGET.environmentId,
+          (state) => state.phase === "connected",
+        );
+        expect(yield* Ref.get(harness.sessions)).toHaveLength(2);
+
+        // While the agent works, a dropped connection is retried.
+        yield* TestClock.adjust("2 minutes");
+        yield* drop((yield* Ref.get(harness.sessions))[1]!.closed);
+        yield* awaitConnectionState(registry, TARGET.environmentId, (state) => state.desired);
+        yield* TestClock.adjust("5 seconds");
+        yield* awaitConnectionState(
+          registry,
+          TARGET.environmentId,
+          (state) => state.phase === "connected",
+        );
+        expect(yield* Ref.get(harness.sessions)).toHaveLength(3);
+      }).pipe(Effect.provide(harness.layer));
+    }),
+  );
+
+  it.effect("gives up when it does not answer, instead of retrying forever", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness([TARGET], [], [], {
+        ...onDemand,
+        prepareError: new ConnectionTransientError({ reason: "network", detail: "Asleep." }),
+      });
+      yield* Effect.gen(function* () {
+        const registry = yield* EnvironmentRegistry.EnvironmentRegistry;
+        yield* registry.start;
+        const ensured = yield* Effect.forkChild(
+          registry.ensureConnected(TARGET.environmentId, "10 minutes").pipe(Effect.flip),
+        );
+        yield* TestClock.adjust("3 minutes");
+        const error = yield* Fiber.join(ensured);
+        expect(error._tag).toBe("ConnectionTransientError");
+        expect(yield* registry.state(TARGET.environmentId)).toMatchObject({
+          desired: false,
+          phase: "available",
+        });
+      }).pipe(Effect.provide(harness.layer));
+    }),
+  );
+
+  it.effect("refuses to connect an environment that is switched off", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness([TARGET], [], [], {
+        ...onDemand,
+        initialDisabled: [TARGET.environmentId],
+      });
+      yield* Effect.gen(function* () {
+        const registry = yield* EnvironmentRegistry.EnvironmentRegistry;
+        yield* registry.start;
+        const error = yield* registry
+          .ensureConnected(TARGET.environmentId, "5 seconds")
+          .pipe(Effect.flip);
+        expect(error).toMatchObject({ _tag: "ConnectionBlockedError", reason: "configuration" });
+        expect(yield* Ref.get(harness.sessions)).toHaveLength(0);
       }).pipe(Effect.provide(harness.layer));
     }),
   );

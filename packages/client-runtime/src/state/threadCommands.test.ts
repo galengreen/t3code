@@ -103,6 +103,9 @@ const makeHarness = Effect.fn("TestThreadCommands.makeHarness")(function* () {
   const runtime = Atom.runtime(
     Layer.mergeAll(
       Layer.succeed(EnvironmentRegistry.EnvironmentRegistry, {
+        entries: (yield* SubscriptionRef.make(
+          new Map(),
+        )) as unknown as EnvironmentRegistry.EnvironmentRegistry["Service"]["entries"],
         run: (_environmentId, effect) =>
           Effect.provideService(effect, EnvironmentSupervisor.EnvironmentSupervisor, supervisor),
       } as EnvironmentRegistry.EnvironmentRegistry["Service"]),

@@ -119,6 +119,9 @@ const makeHarness = Effect.fn("ServerUsageTest.makeHarness")(function* (
     retryNow: Effect.void,
   });
   const environments = EnvironmentRegistry.EnvironmentRegistry.of({
+    entries: (yield* SubscriptionRef.make(
+      new Map(),
+    )) as unknown as EnvironmentRegistry.EnvironmentRegistry["Service"]["entries"],
     run: (_environmentId, effect) =>
       Effect.provideService(effect, EnvironmentSupervisor.EnvironmentSupervisor, supervisor),
     followStream: (_environmentId, stream) =>

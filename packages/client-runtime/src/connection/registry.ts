@@ -1,5 +1,6 @@
 import { EnvironmentId } from "@t3tools/contracts";
 import * as Context from "effect/Context";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Equal from "effect/Equal";
 import * as Exit from "effect/Exit";
@@ -16,6 +17,7 @@ import * as ClientCapabilities from "../platform/capabilities.ts";
 import {
   type ConnectionCatalogEntry,
   type ConnectionRegistration,
+  type ConnectWhen,
   type PlatformConnectionRegistration,
   type PrimaryConnectionRegistration,
   SshConnectionProfile,
@@ -30,7 +32,7 @@ import type {
   NetworkStatus,
   SupervisorConnectionState,
 } from "./model.ts";
-import { ConnectionBlockedError } from "./model.ts";
+import { ConnectionBlockedError, ConnectionTransientError } from "./model.ts";
 import * as Persistence from "../platform/persistence.ts";
 import * as EnvironmentSupervisor from "./supervisor.ts";
 import * as ConnectionDriver from "./driver.ts";
@@ -83,8 +85,13 @@ export class EnvironmentRegistry extends Context.Service<
     >;
     readonly networkStatus: SubscriptionRef.SubscriptionRef<NetworkStatus>;
     readonly start: Effect.Effect<void>;
+    /**
+     * Saves and starts an environment. `connectWhen` sets its policy; without
+     * it a re-registered environment keeps the one it had.
+     */
     readonly register: (
       registration: ConnectionRegistration,
+      options?: { readonly connectWhen?: ConnectWhen },
     ) => Effect.Effect<void, Persistence.ConnectionPersistenceError>;
     readonly registerPlatform: (registration: PrimaryConnectionRegistration) => Effect.Effect<void>;
     readonly reconcilePlatform: (
@@ -120,6 +127,38 @@ export class EnvironmentRegistry extends Context.Service<
       | Persistence.ConnectionPersistenceError
       | ConnectionBlockedError
     >;
+    /**
+     * Sets when a saved environment connects (see `ConnectWhen`) and persists
+     * it. Restarts its connection under the new policy.
+     */
+    readonly setConnectWhen: (
+      environmentId: EnvironmentId,
+      connectWhen: ConnectWhen,
+    ) => Effect.Effect<
+      void,
+      EnvironmentNotRegisteredError | Persistence.ConnectionPersistenceError
+    >;
+    /**
+     * Records whether an environment was last seen with an agent working.
+     * An environment that connects when needed reconnects to follow that work,
+     * and keeps retrying a dropped connection for a while.
+     */
+    readonly setActiveWork: (environmentId: EnvironmentId, active: boolean) => Effect.Effect<void>;
+    /**
+     * Closes an environment's connection until something needs it again.
+     * Nothing is saved; for environments that connect when needed, such as a
+     * sandbox the user just put to sleep.
+     */
+    readonly disconnect: (environmentId: EnvironmentId) => Effect.Effect<void>;
+    /**
+     * Connects (waking an environment that connects when needed) and waits
+     * until the connection is up. Fails when the environment is switched off
+     * or blocked, or does not answer within `timeout`.
+     */
+    readonly ensureConnected: (
+      environmentId: EnvironmentId,
+      timeout: Duration.Input,
+    ) => Effect.Effect<void, EnvironmentNotRegisteredError | ConnectionAttemptError>;
     readonly setCompatibility: (
       environmentId: EnvironmentId,
       error: ConnectionBlockedError | null,
@@ -175,6 +214,7 @@ export const make = Effect.gen(function* () {
   const ssh = yield* ClientCapabilities.SshEnvironmentGateway;
   const persistedTargets = yield* storage.list;
   const disabledEnvironmentIds = new Set(yield* storage.listDisabled);
+  const onDemandEnvironmentIds = new Set(yield* storage.listOnDemand);
   const initialEntries = new Map(
     yield* Effect.forEach(
       persistedTargets,
@@ -189,6 +229,9 @@ export const make = Effect.gen(function* () {
             target,
             profile,
             enabled: !disabledEnvironmentIds.has(target.environmentId),
+            ...(onDemandEnvironmentIds.has(target.environmentId)
+              ? { connectWhen: "needed" as const }
+              : {}),
           } satisfies ConnectionCatalogEntry,
         ] as const;
       }),
@@ -202,6 +245,8 @@ export const make = Effect.gen(function* () {
     ReadonlyMap<EnvironmentId, EnvironmentServiceScope>
   >(new Map());
   const platformEnvironmentIds = yield* Ref.make<ReadonlySet<EnvironmentId>>(new Set());
+  // Environments last seen with an agent working; see `setActiveWork`.
+  const activeWork = yield* Ref.make<ReadonlySet<EnvironmentId>>(new Set());
   const persistedTargetsByEnvironment = yield* Ref.make<
     ReadonlyMap<EnvironmentId, ConnectionTarget>
   >(new Map(persistedTargets.map((target) => [target.environmentId, target])));
@@ -292,8 +337,18 @@ export const make = Effect.gen(function* () {
         Effect.gen(function* () {
           const environmentId = entry.target.environmentId;
           const scope = yield* Scope.fork(registryScope);
+          const onDemand = entry.connectWhen === "needed";
           const supervisor = yield* EnvironmentSupervisor.make(entry, {
             initiallyDesired: false,
+            ...(onDemand
+              ? {
+                  onDemand: {
+                    hasActiveWork: Ref.get(activeWork).pipe(
+                      Effect.map((active) => active.has(environmentId)),
+                    ),
+                  },
+                }
+              : {}),
           }).pipe(
             Effect.provideService(Connectivity.Connectivity, connectivity),
             Effect.provideService(ConnectionDriver.ConnectionDriver, driver),
@@ -301,7 +356,7 @@ export const make = Effect.gen(function* () {
             Scope.provide(scope),
             Effect.onError(() => Scope.close(scope, Exit.void)),
           );
-          if (entry.enabled) {
+          if (entry.enabled && !onDemand) {
             yield* supervisor.connect;
           }
           yield* SubscriptionRef.update(serviceScopes, (current) => {
@@ -447,6 +502,7 @@ export const make = Effect.gen(function* () {
 
   const register = Effect.fn("EnvironmentRegistry.register")(function* (
     registration: ConnectionRegistration,
+    options?: { readonly connectWhen?: ConnectWhen },
   ) {
     const registered = connectionRegistrationCatalogEntry(registration);
     const environmentId = registered.target.environmentId;
@@ -458,12 +514,15 @@ export const make = Effect.gen(function* () {
         }
         // Editing a saved environment must preserve its disabled state.
         const previous = (yield* SubscriptionRef.get(entries)).get(environmentId);
+        const connectWhen = options?.connectWhen ?? previous?.connectWhen ?? "always";
+        const policy = connectWhen === "needed" ? { connectWhen } : {};
         const entry: ConnectionCatalogEntry =
           previous === undefined
-            ? registered
+            ? { ...registered, ...policy }
             : {
                 ...registered,
                 enabled: previous.enabled,
+                ...policy,
                 ...(previous.unsupportedReason !== undefined &&
                 gitHubRoutingConnectionKey(previous) === gitHubRoutingConnectionKey(registered)
                   ? unsupportedState(previous)
@@ -484,6 +543,9 @@ export const make = Effect.gen(function* () {
           );
         }
         yield* registrations.register(registration);
+        if (options?.connectWhen !== undefined) {
+          yield* registrations.setConnectWhen(environmentId, options.connectWhen);
+        }
         yield* Ref.update(persistedTargetsByEnvironment, (current) => {
           const next = new Map(current);
           next.set(environmentId, registration.target);
@@ -818,6 +880,99 @@ export const make = Effect.gen(function* () {
     );
   });
 
+  const setConnectWhen = Effect.fn("EnvironmentRegistry.setConnectWhen")(function* (
+    environmentId: EnvironmentId,
+    connectWhen: ConnectWhen,
+  ) {
+    yield* withLeaseLock(
+      environmentId,
+      Effect.gen(function* () {
+        const entry = yield* getEntry(environmentId);
+        if ((entry.connectWhen ?? "always") === connectWhen) return;
+        if (!(yield* Ref.get(platformEnvironmentIds)).has(environmentId)) {
+          yield* registrations.setConnectWhen(environmentId, connectWhen);
+        }
+        const { connectWhen: _previous, ...rest } = entry;
+        // The supervisor's policy is fixed when it is made, so start a new one.
+        yield* installEntryLocked(connectWhen === "needed" ? { ...rest, connectWhen } : rest);
+      }),
+    );
+  });
+
+  const setActiveWork = Effect.fn("EnvironmentRegistry.setActiveWork")(function* (
+    environmentId: EnvironmentId,
+    active: boolean,
+  ) {
+    const wasActive = yield* Ref.modify(activeWork, (current) => {
+      const had = current.has(environmentId);
+      if (had === active) return [had, current] as const;
+      const next = new Set(current);
+      if (active) next.add(environmentId);
+      else next.delete(environmentId);
+      return [had, next] as const;
+    });
+    if (!active || wasActive) return;
+    // Work seen in an environment that is not connected (for example, from
+    // the cache at launch) is followed once, so its results arrive.
+    const entry = (yield* SubscriptionRef.get(entries)).get(environmentId);
+    const lease = (yield* SubscriptionRef.get(serviceScopes)).get(environmentId);
+    if (entry?.connectWhen !== "needed" || !entry.enabled || lease === undefined) return;
+    if (!(yield* SubscriptionRef.get(lease.supervisor.state)).desired) {
+      yield* lease.supervisor.connect;
+    }
+  });
+
+  const disconnect = Effect.fn("EnvironmentRegistry.disconnect")(function* (
+    environmentId: EnvironmentId,
+  ) {
+    const lease = (yield* SubscriptionRef.get(serviceScopes)).get(environmentId);
+    if (lease !== undefined) yield* lease.supervisor.disconnect;
+  });
+
+  const ensureConnected = Effect.fn("EnvironmentRegistry.ensureConnected")(function* (
+    environmentId: EnvironmentId,
+    timeout: Duration.Input,
+  ) {
+    const entry = yield* getEntry(environmentId);
+    if (!entry.enabled) {
+      return yield* new ConnectionBlockedError({
+        reason: "configuration",
+        detail: entry.unsupportedReason ?? `${entry.target.label} is switched off.`,
+      });
+    }
+    const supervisor = yield* acquireSupervisor(environmentId);
+    if ((yield* SubscriptionRef.get(supervisor.state)).phase === "connected") return;
+    const changes = SubscriptionRef.changes(supervisor.state);
+    yield* supervisor.connect;
+    // Skip the state from before the request took effect, then wait for the
+    // connection, a block, or an on-demand supervisor giving up.
+    const settled = Option.flatten(
+      yield* changes.pipe(
+        Stream.dropWhile((current) => !current.desired && current.phase === "available"),
+        Stream.filter(
+          (current) =>
+            current.phase === "connected" || current.phase === "blocked" || !current.desired,
+        ),
+        Stream.runHead,
+        Effect.timeoutOption(timeout),
+      ),
+    );
+    if (Option.isSome(settled) && settled.value.phase === "connected") return;
+    return yield* Option.match(settled, {
+      onSome: (current): ConnectionAttemptError =>
+        current.lastFailure ??
+        new ConnectionTransientError({
+          reason: "endpoint-unavailable",
+          detail: `${entry.target.label} did not answer.`,
+        }),
+      onNone: () =>
+        new ConnectionTransientError({
+          reason: "timeout",
+          detail: `${entry.target.label} did not answer in time.`,
+        }),
+    });
+  });
+
   const state = Effect.fn("EnvironmentRegistry.state")(function* (environmentId: EnvironmentId) {
     const supervisor = yield* acquireSupervisor(environmentId);
     return yield* SubscriptionRef.get(supervisor.state);
@@ -907,6 +1062,10 @@ export const make = Effect.gen(function* () {
     removeRelayEnvironments,
     retryNow,
     setEnabled,
+    setConnectWhen,
+    setActiveWork,
+    disconnect,
+    ensureConnected,
     setCompatibility,
     state,
     stateChanges,

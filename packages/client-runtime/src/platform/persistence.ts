@@ -11,7 +11,7 @@ import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
-import type { ConnectionRegistration } from "../connection/catalog.ts";
+import type { ConnectionRegistration, ConnectWhen } from "../connection/catalog.ts";
 import type { ConnectionTarget } from "../connection/model.ts";
 
 export class ConnectionPersistenceError extends Schema.TaggedError<ConnectionPersistenceError>()(
@@ -20,9 +20,11 @@ export class ConnectionPersistenceError extends Schema.TaggedError<ConnectionPer
     operation: Schema.Literals([
       "list-targets",
       "list-disabled-targets",
+      "list-on-demand-targets",
       "register-connection",
       "remove-connection",
       "set-connection-enabled",
+      "set-connection-policy",
       "load-shell",
       "save-shell",
       "load-thread",
@@ -46,6 +48,8 @@ export class ConnectionTargetStore extends Context.Service<
     readonly list: Effect.Effect<ReadonlyArray<ConnectionTarget>, ConnectionPersistenceError>;
     /** Saved environments the user switched off. See `ConnectionRegistrationStore.setEnabled`. */
     readonly listDisabled: Effect.Effect<ReadonlyArray<EnvironmentId>, ConnectionPersistenceError>;
+    /** Saved environments that connect only when needed. See `ConnectWhen`. */
+    readonly listOnDemand: Effect.Effect<ReadonlyArray<EnvironmentId>, ConnectionPersistenceError>;
   }
 >()("@t3tools/client-runtime/platform/persistence/ConnectionTargetStore") {}
 
@@ -59,6 +63,10 @@ export class ConnectionRegistrationStore extends Context.Service<
     readonly setEnabled: (
       environmentId: EnvironmentId,
       enabled: boolean,
+    ) => Effect.Effect<void, ConnectionPersistenceError>;
+    readonly setConnectWhen: (
+      environmentId: EnvironmentId,
+      connectWhen: ConnectWhen,
     ) => Effect.Effect<void, ConnectionPersistenceError>;
   }
 >()("@t3tools/client-runtime/platform/persistence/ConnectionRegistrationStore") {}

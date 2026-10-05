@@ -10,7 +10,7 @@ import * as PartitionedSemaphore from "effect/PartitionedSemaphore";
 import * as SubscriptionRef from "effect/SubscriptionRef";
 import type { Atom } from "effect/unstable/reactivity";
 
-import type { ConnectionCatalogEntry } from "../connection/catalog.ts";
+import type { ConnectionCatalogEntry, ConnectWhen } from "../connection/catalog.ts";
 import * as ConnectionOnboarding from "../connection/onboarding.ts";
 import * as EnvironmentRegistry from "../connection/registry.ts";
 import { request } from "../rpc/client.ts";
@@ -114,6 +114,7 @@ const registerSandboxEnvironment = Effect.fn("clientRuntime.sandbox.ensureEnviro
     return yield* onboarding.registerPairing({
       host: pairing.httpBaseUrl,
       pairingCode: pairing.credential,
+      connectWhen: sandboxConnectWhen(sandbox),
     });
   }
   if (action.kind === "update") {
@@ -152,18 +153,33 @@ export const ensureSandboxEnvironment = (
       );
 
 /**
- * Whether this client's connection to a sandbox should be switched on or off
- * to match it. A sleeping sandbox's connection is switched off so the client
- * stops retrying it, and back on once the sandbox is serving again, whoever
- * woke it.
+ * Fly sandboxes connect only when needed: a sleeping one wakes when something
+ * connects, so a client must not retry it in the background. Docker sandboxes
+ * cannot wake on request and keep an ordinary connection.
+ */
+export const sandboxConnectWhen = (sandbox: Pick<SandboxSummary, "backend">): ConnectWhen =>
+  sandbox.backend === "fly" ? "needed" : "always";
+
+/**
+ * How this client's saved connection to a sandbox should change to match it.
+ * A Fly sandbox stays switched on whatever its state and connects when
+ * needed. A Docker sandbox's connection is switched off while it is stopped,
+ * so the client stops retrying it, and back on once it is serving again,
+ * whoever woke it.
  */
 export function sandboxConnectionChange(
-  entry: Pick<ConnectionCatalogEntry, "enabled"> | undefined,
-  sandbox: Pick<SandboxSummary, "state" | "httpBaseUrl">,
-): "enable" | "disable" | "none" {
-  if (entry === undefined) return "none";
-  if (sandbox.state !== "running") return entry.enabled ? "disable" : "none";
-  return sandbox.httpBaseUrl !== null && !entry.enabled ? "enable" : "none";
+  entry: Pick<ConnectionCatalogEntry, "enabled" | "connectWhen"> | undefined,
+  sandbox: Pick<SandboxSummary, "backend" | "state" | "httpBaseUrl">,
+): { readonly enabled?: boolean; readonly connectWhen?: ConnectWhen } {
+  if (entry === undefined) return {};
+  if (sandboxConnectWhen(sandbox) === "needed") {
+    return {
+      ...(entry.connectWhen === "needed" ? {} : { connectWhen: "needed" as const }),
+      ...(entry.enabled ? {} : { enabled: true }),
+    };
+  }
+  if (sandbox.state !== "running") return entry.enabled ? { enabled: false } : {};
+  return sandbox.httpBaseUrl !== null && !entry.enabled ? { enabled: true } : {};
 }
 
 /**
@@ -191,11 +207,20 @@ export const syncSandboxEnvironments = Effect.fn("clientRuntime.sandbox.syncEnvi
     yield* Effect.forEach(
       sandboxes,
       (sandbox) => {
-        if (sandbox.environmentId === null) return Effect.void;
-        const change = sandboxConnectionChange(entries.get(sandbox.environmentId), sandbox);
-        return change === "none"
-          ? Effect.void
-          : registry.setEnabled(sandbox.environmentId, change === "enable").pipe(Effect.ignore);
+        const environmentId = sandbox.environmentId;
+        if (environmentId === null) return Effect.void;
+        const change = sandboxConnectionChange(entries.get(environmentId), sandbox);
+        return Effect.all(
+          [
+            change.connectWhen === undefined
+              ? Effect.void
+              : registry.setConnectWhen(environmentId, change.connectWhen),
+            change.enabled === undefined
+              ? Effect.void
+              : registry.setEnabled(environmentId, change.enabled),
+          ],
+          { discard: true },
+        ).pipe(Effect.ignore);
       },
       { discard: true },
     );
@@ -219,10 +244,9 @@ export type SandboxChange = "start" | "stop" | "remove";
 
 /**
  * Starts, stops, or deletes a sandbox through its host and returns the host's
- * sandboxes afterwards. Stopping also switches this client's connection to it
- * off: retrying a stopped sandbox would only fail, and a Fly sandbox starts
- * again whenever something connects to it. Starting switches it back on at
- * the sandbox's new address; deleting forgets it, since its environment is gone.
+ * sandboxes afterwards. Stopping first closes this client's connection to it
+ * (see `sandboxConnectionChange`), starting connects at its new address, and
+ * deleting forgets it, since its environment is gone.
  */
 export const changeSandboxEnvironment = Effect.fn("clientRuntime.sandbox.change")(function* (
   hostEnvironmentId: EnvironmentId,
@@ -239,12 +263,18 @@ export const changeSandboxEnvironment = Effect.fn("clientRuntime.sandbox.change"
       if (started.environmentId !== null) {
         yield* registry.setEnabled(started.environmentId, true).pipe(Effect.ignore);
       }
-      yield* ensureSandboxEnvironment(hostEnvironmentId, started);
+      const environmentId = yield* ensureSandboxEnvironment(hostEnvironmentId, started);
+      // Starting it is a need: connect now rather than when next used.
+      yield* registry.ensureConnected(environmentId, "60 seconds").pipe(Effect.ignore);
       break;
     }
     case "stop":
       if (sandbox.environmentId !== null) {
-        yield* registry.setEnabled(sandbox.environmentId, false).pipe(Effect.ignore);
+        // A Fly sandbox wakes when something connects, so close this client's
+        // connection first; a Docker one is switched off until it is started.
+        yield* sandboxConnectWhen(sandbox) === "needed"
+          ? registry.disconnect(sandbox.environmentId)
+          : registry.setEnabled(sandbox.environmentId, false).pipe(Effect.ignore);
       }
       yield* registry.run(hostEnvironmentId, request(WS_METHODS.sandboxStop, { id: sandbox.id }));
       break;

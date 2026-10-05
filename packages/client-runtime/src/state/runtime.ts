@@ -459,6 +459,33 @@ function runInEnvironment<A, E, R>(
   );
 }
 
+// Long enough for a sleeping machine to wake (about a second) or boot.
+const WAKE_TIMEOUT = "60 seconds";
+
+/**
+ * Connects an environment that connects only when needed (a sleeping
+ * sandbox) before a user command runs in it. Other environments are left to
+ * their own connection, so a command still fails fast while they are offline.
+ */
+function connectIfNeeded(
+  environmentId: EnvironmentIdType,
+): Effect.Effect<void, EnvironmentRpcUnavailableError, EnvironmentRegistry.EnvironmentRegistry> {
+  return Effect.gen(function* () {
+    const registry = yield* EnvironmentRegistry.EnvironmentRegistry;
+    const entry = (yield* SubscriptionRef.get(registry.entries)).get(environmentId);
+    if (entry?.connectWhen !== "needed") return;
+    yield* registry.ensureConnected(environmentId, WAKE_TIMEOUT).pipe(
+      Effect.mapError(
+        (error) =>
+          new EnvironmentRpcUnavailableError({
+            environmentId,
+            message: error.message,
+          }),
+      ),
+    );
+  });
+}
+
 export function runStreamInEnvironment<A, E, R>(
   environmentId: EnvironmentIdType,
   stream: Stream.Stream<A, E, R>,
@@ -624,9 +651,13 @@ export function createEnvironmentCommand<R, ER, Input, A, E>(
     ...(options.scheduler === undefined ? {} : { scheduler: options.scheduler }),
     ...(options.concurrency === undefined ? {} : { concurrency: options.concurrency }),
     execute: (target, registry) =>
-      runInEnvironment(
-        target.environmentId,
-        options.execute(target.input, registry, target.environmentId),
+      connectIfNeeded(target.environmentId).pipe(
+        Effect.andThen(
+          runInEnvironment(
+            target.environmentId,
+            options.execute(target.input, registry, target.environmentId),
+          ),
+        ),
       ),
   });
 }

@@ -7,6 +7,7 @@ import {
 import type { AtomCommandResult } from "@t3tools/client-runtime/state/runtime";
 import { deriveThreadTitleSeed } from "@t3tools/client-runtime/operations";
 import {
+  type EnvironmentId,
   CommandId,
   DEFAULT_PROVIDER_INTERACTION_MODE,
   DEFAULT_RUNTIME_MODE,
@@ -30,6 +31,7 @@ import {
   retainAcknowledgedThreadMessage,
   forgetAcknowledgedThreadMessage,
 } from "./acknowledged-thread-messages";
+import { environmentCatalog } from "../connection/catalog";
 import { appAtomRegistry } from "./atom-registry";
 import { restoredNewTaskDraftKey } from "./new-task-draft-key";
 import { useProjects, useServerConfigs, useThreadShells } from "./entities";
@@ -647,6 +649,33 @@ export function useThreadOutboxDrain(): void {
   const projects = useProjects();
   const serverConfigs = useServerConfigs();
   const { connectedEnvironments } = useRemoteConnectionStatus();
+  // A message waiting for an environment that connects only when needed (a
+  // sleeping sandbox) is the need: connect it once per wait, so an
+  // unreachable sandbox is not woken again and again.
+  const connectEnvironment = useAtomCommand(environmentCatalog.connect, { reportFailure: false });
+  const wokenEnvironmentIdsRef = useRef(new Set<EnvironmentId>());
+  useEffect(() => {
+    const waiting = new Set<EnvironmentId>();
+    for (const queue of Object.values(queuedMessagesByThreadKey)) {
+      for (const message of queue) waiting.add(message.environmentId);
+    }
+    for (const environmentId of wokenEnvironmentIdsRef.current) {
+      if (!waiting.has(environmentId)) wokenEnvironmentIdsRef.current.delete(environmentId);
+    }
+    for (const environment of connectedEnvironments) {
+      if (
+        !environment.connectsWhenNeeded ||
+        !environment.isEnabled ||
+        environment.connectionState !== "available" ||
+        !waiting.has(environment.environmentId) ||
+        wokenEnvironmentIdsRef.current.has(environment.environmentId)
+      ) {
+        continue;
+      }
+      wokenEnvironmentIdsRef.current.add(environment.environmentId);
+      void connectEnvironment(environment.environmentId);
+    }
+  }, [connectEnvironment, connectedEnvironments, queuedMessagesByThreadKey]);
   const [retryTick, setRetryTick] = useState(0);
   const retryAttemptRef = useRef(new Map<MessageId, number>());
   const retryNotBeforeRef = useRef(new Map<MessageId, number>());
