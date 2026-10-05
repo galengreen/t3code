@@ -178,8 +178,8 @@ import * as TerminalManager from "./terminal/Manager.ts";
 import { withTerminalOutputWindow } from "./terminal/OutputProtocol.ts";
 import * as PreviewAutomationBroker from "./mcp/PreviewAutomationBroker.ts";
 import * as DeviceService from "./device/DeviceService.ts";
-import * as SandboxService from "./sandbox/SandboxService.ts";
-import * as IdleShutdown from "./sandbox/IdleShutdown.ts";
+import * as CubeService from "./cube/CubeService.ts";
+import * as IdleShutdown from "./cube/IdleShutdown.ts";
 import { remoteSshDeviceHosts } from "./device/localSshDeviceHost.ts";
 import * as PreviewManager from "./preview/Manager.ts";
 import { issueAssetUrl } from "./assets/AssetAccess.ts";
@@ -1220,7 +1220,7 @@ const makeWsRpcLayer = (
       const pullRequests = yield* PullRequestService.PullRequestService;
       const pullRequestSync = yield* PullRequestSyncReactor.PullRequestSyncReactor;
       const deviceService = yield* DeviceService.DeviceService;
-      const sandboxService = yield* SandboxService.SandboxService;
+      const cubeService = yield* CubeService.CubeService;
       const idleShutdown = yield* IdleShutdown.IdleShutdown;
       const deviceHostContext =
         yield* Effect.context<Effect.Services<ReturnType<typeof remoteSshDeviceHosts>>>();
@@ -3561,43 +3561,41 @@ const makeWsRpcLayer = (
           observeRpcEffect(WS_METHODS.deviceAction, deviceService.action(input), {
             "rpc.aggregate": "device",
           }),
-        [WS_METHODS.sandboxList]: (_input) =>
-          observeRpcEffect(WS_METHODS.sandboxList, sandboxService.list, {
-            "rpc.aggregate": "sandbox",
+        [WS_METHODS.cubeList]: (_input) =>
+          observeRpcEffect(WS_METHODS.cubeList, cubeService.list, {
+            "rpc.aggregate": "cube",
           }),
-        [WS_METHODS.sandboxCreate]: (input) =>
-          observeRpcEffect(WS_METHODS.sandboxCreate, sandboxService.create(input), {
-            "rpc.aggregate": "sandbox",
+        [WS_METHODS.cubeCreate]: (input) =>
+          observeRpcEffect(WS_METHODS.cubeCreate, cubeService.create(input), {
+            "rpc.aggregate": "cube",
           }),
-        [WS_METHODS.sandboxStart]: (input) =>
-          observeRpcEffect(WS_METHODS.sandboxStart, sandboxService.start(input), {
-            "rpc.aggregate": "sandbox",
+        [WS_METHODS.cubeStart]: (input) =>
+          observeRpcEffect(WS_METHODS.cubeStart, cubeService.start(input), {
+            "rpc.aggregate": "cube",
           }),
-        [WS_METHODS.sandboxStop]: (input) =>
-          observeRpcEffect(WS_METHODS.sandboxStop, sandboxService.stop(input), {
-            "rpc.aggregate": "sandbox",
+        [WS_METHODS.cubeStop]: (input) =>
+          observeRpcEffect(WS_METHODS.cubeStop, cubeService.stop(input), {
+            "rpc.aggregate": "cube",
           }),
-        [WS_METHODS.sandboxRemove]: (input) =>
-          observeRpcEffect(WS_METHODS.sandboxRemove, sandboxService.remove(input), {
-            "rpc.aggregate": "sandbox",
+        [WS_METHODS.cubeRemove]: (input) =>
+          observeRpcEffect(WS_METHODS.cubeRemove, cubeService.remove(input), {
+            "rpc.aggregate": "cube",
           }),
-        [WS_METHODS.sandboxPair]: (input) =>
-          observeRpcEffect(WS_METHODS.sandboxPair, sandboxService.pair(input), {
-            "rpc.aggregate": "sandbox",
+        [WS_METHODS.cubePair]: (input) =>
+          observeRpcEffect(WS_METHODS.cubePair, cubeService.pair(input), {
+            "rpc.aggregate": "cube",
           }),
-        [WS_METHODS.sandboxRemovedEnvironments]: (_input) =>
-          observeRpcEffect(
-            WS_METHODS.sandboxRemovedEnvironments,
-            sandboxService.removedEnvironments,
-            { "rpc.aggregate": "sandbox" },
-          ),
-        [WS_METHODS.sandboxSleep]: (_input) =>
-          observeRpcEffect(WS_METHODS.sandboxSleep, idleShutdown.sleepNow, {
-            "rpc.aggregate": "sandbox",
+        [WS_METHODS.cubeRemovedEnvironments]: (_input) =>
+          observeRpcEffect(WS_METHODS.cubeRemovedEnvironments, cubeService.removedEnvironments, {
+            "rpc.aggregate": "cube",
           }),
-        [WS_METHODS.sandboxFlyAccount]: (input) =>
-          observeRpcEffect(WS_METHODS.sandboxFlyAccount, sandboxService.flyAccount(input), {
-            "rpc.aggregate": "sandbox",
+        [WS_METHODS.cubeSleep]: (_input) =>
+          observeRpcEffect(WS_METHODS.cubeSleep, idleShutdown.sleepNow, {
+            "rpc.aggregate": "cube",
+          }),
+        [WS_METHODS.cubeFlyAccount]: (input) =>
+          observeRpcEffect(WS_METHODS.cubeFlyAccount, cubeService.flyAccount(input), {
+            "rpc.aggregate": "cube",
           }),
         [WS_METHODS.subscribeDeviceState]: (_input) =>
           observeRpcStream(

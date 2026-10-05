@@ -85,7 +85,7 @@ export interface EnvironmentConnectionSummary {
   readonly displayUrl: string;
   readonly isRelayManaged: boolean;
   readonly isEnabled: boolean;
-  /** Connects only when needed (a sandbox): not being connected is its normal, idle state. */
+  /** Connects only when needed (a cube): not being connected is its normal, idle state. */
   readonly connectsWhenNeeded: boolean;
   readonly connectionState: EnvironmentConnectionPhase;
   readonly connectionError: string | null;

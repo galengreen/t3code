@@ -17,7 +17,7 @@ import { Schema } from "effect";
 import { ThreadId, TrimmedNonEmptyString } from "./baseSchemas.ts";
 
 /**
- * `desktop` is a streamed X display on a Linux host (a sandbox's virtual
+ * `desktop` is a streamed X display on a Linux host (a cube's virtual
  * desktop), served by the environment server itself rather than the hub.
  */
 export const DevicePlatform = Schema.Literals(["ios", "android", "desktop"]);

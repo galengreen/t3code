@@ -58,30 +58,30 @@ describes the server. Process replacement belongs to the launcher's
 [update protocol](./server-updates.md); the connection runtime handles the
 resulting disconnect.
 
-### Sandboxes
+### Cubes
 
-A host environment can create sandboxes: Docker containers that each run their
+A host environment can create cubes: Docker containers that each run their
 own T3 server, so a paired client sees a complete environment. The
-[sandbox service](../../apps/server/src/sandbox/SandboxService.ts) only creates,
+[cube service](../../apps/server/src/cube/CubeService.ts) only creates,
 starts, stops, removes, and mints pairing credentials; it never runs work inside
-one. Docker is the record: containers carry `t3code.sandbox.*` labels and are
-read back with `docker inspect`, so there is no sandbox table to drift.
+one. Docker is the record: containers carry `t3code.cube.*` labels and are
+read back with `docker inspect`, so there is no cube table to drift.
 
 The product calls them cubes (UI copy, errors, `t3 cube`). Code, contracts, RPC
-methods, settings keys, and container labels keep `sandbox`, so renaming the
+methods, settings keys, and container labels keep `cube`, so renaming the
 product term never touches the wire or stored state.
 
-Clients connect to a sandbox directly, at `sandboxPublishHost` (loopback by
+Clients connect to a cube directly, at `cubePublishHost` (loopback by
 default, so only clients on the host machine). Docker assigns a new port each
-time a sandbox starts, so a client cannot keep a sandbox's address. Instead each
-client re-resolves its sandboxes from the host:
-[`syncSandboxEnvironments`](../../packages/client-runtime/src/state/sandbox.ts)
+time a cube starts, so a client cannot keep a cube's address. Instead each
+client re-resolves its cubes from the host:
+[`syncCubeEnvironments`](../../packages/client-runtime/src/state/cube.ts)
 registers ones it has not seen and moves saved ones to their current port,
-keyed by the sandbox's environment ID, which survives restarts. A published
+keyed by the cube's environment ID, which survives restarts. A published
 container port also crosses Docker's NAT and the host firewall, which host
 networking does not; a firewall that filters forwarded traffic makes a LAN or
 tailnet publish address unreachable even though the host itself answers there.
-Sandboxes are off by default because access to the Docker daemon is effectively
+Cubes are off by default because access to the Docker daemon is effectively
 root on the host.
 
 ### Desktop without a local environment

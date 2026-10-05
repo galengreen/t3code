@@ -177,7 +177,7 @@ describe("IdleShutdown", () => {
       const { slept, idle } = yield* harness({});
       yield* TestClock.adjust("1 day");
       expect(yield* Ref.get(slept)).toBe(0);
-      expect((yield* idle.sleepNow.pipe(Effect.flip))._tag).toBe("SandboxUnavailableError");
+      expect((yield* idle.sleepNow.pipe(Effect.flip))._tag).toBe("CubeUnavailableError");
     }).pipe(Effect.scoped),
   );
 });
@@ -200,8 +200,8 @@ describe("suspendFlyMachine", () => {
         }),
         () => Effect.sync(() => server.close()),
       );
-      expect(yield* IdleShutdown.suspendFlyMachine("t3-sbx-abc", "m1", socketPath)).toBe(true);
-      expect(requests).toEqual(["POST /v1/apps/t3-sbx-abc/machines/m1/suspend"]);
+      expect(yield* IdleShutdown.suspendFlyMachine("t3-cube-abc", "m1", socketPath)).toBe(true);
+      expect(requests).toEqual(["POST /v1/apps/t3-cube-abc/machines/m1/suspend"]);
     }).pipe(Effect.scoped),
   );
 });

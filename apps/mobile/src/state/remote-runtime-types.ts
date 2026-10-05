@@ -15,7 +15,7 @@ export interface ConnectedEnvironmentSummary {
   readonly isRelayManaged: boolean;
   /** False when the user switched the environment off in Settings. */
   readonly isEnabled: boolean;
-  /** Connects only when needed (a sandbox): not being connected is its normal, idle state. */
+  /** Connects only when needed (a cube): not being connected is its normal, idle state. */
   readonly connectsWhenNeeded: boolean;
   readonly connectionState: EnvironmentConnectionPhase;
   readonly connectionError: string | null;

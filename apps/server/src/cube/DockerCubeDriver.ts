@@ -1,16 +1,16 @@
 /**
- * Runs sandboxes as Docker containers on this host.
+ * Runs cubes as Docker containers on this host.
  *
- * Every sandbox container carries `t3code.sandbox.*` labels, and listing reads
- * them back with `docker inspect`, so a sandbox removed by hand simply
+ * Every cube container carries `t3code.cube.*` labels, and listing reads
+ * them back with `docker inspect`, so a cube removed by hand simply
  * disappears. Files live on a named volume mounted at the image's home, so
- * they survive stop and start. The sandbox's T3 port is published on
- * `sandboxPublishHost` (loopback by default), and clients connect to it there
- * directly. Docker picks a new host port each time a sandbox starts, so its
+ * they survive stop and start. The cube's T3 port is published on
+ * `cubePublishHost` (loopback by default), and clients connect to it there
+ * directly. Docker picks a new host port each time a cube starts, so its
  * address is not stable across stop and start.
  *
  * A spare is named `t3-spare-<id>` and carries the settings fingerprint it was
- * made with; claiming renames it to `t3-sandbox-<id>`, since labels are fixed
+ * made with; claiming renames it to `t3-cube-<id>`, since labels are fixed
  * at creation. Parking pauses it, which keeps its booted server in memory.
  *
  * Environment variables are fixed when the container is created. Sensitive
@@ -19,42 +19,37 @@
  */
 import {
   EnvironmentId,
-  SandboxNotFoundError,
-  SandboxOperationError,
-  SandboxUnavailableError,
-  type SandboxId,
-  type SandboxSize,
-  type SandboxState,
+  CubeNotFoundError,
+  CubeOperationError,
+  CubeUnavailableError,
+  type CubeId,
+  type CubeSize,
+  type CubeState,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 
 import * as ProcessRunner from "../processRunner.ts";
 import * as ServerSettings from "../serverSettings.ts";
-import type {
-  SandboxDriver,
-  SandboxMachine,
-  SandboxOperation,
-  SandboxVariable,
-} from "./SandboxDriver.ts";
+import type { CubeDriver, CubeMachine, CubeOperation, CubeVariable } from "./CubeDriver.ts";
 
-const SANDBOX_LABEL = "t3code.sandbox";
-const SANDBOX_ID_LABEL = "t3code.sandbox.id";
-const SANDBOX_NAME_LABEL = "t3code.sandbox.label";
-const SANDBOX_ENVIRONMENT_LABEL = "t3code.sandbox.environment";
-const SANDBOX_SPARE_LABEL = "t3code.sandbox.spare";
-const SANDBOX_PORT = "7777/tcp";
+const CUBE_LABEL = "t3code.cube";
+const CUBE_ID_LABEL = "t3code.cube.id";
+const CUBE_NAME_LABEL = "t3code.cube.label";
+const CUBE_ENVIRONMENT_LABEL = "t3code.cube.environment";
+const CUBE_SPARE_LABEL = "t3code.cube.spare";
+const CUBE_PORT = "7777/tcp";
 
 /** Docker has no dedicated CPUs, so large gets more of them instead. */
-const SIZE_LIMITS: Record<SandboxSize, { readonly cpus: string; readonly memory: string }> = {
+const SIZE_LIMITS: Record<CubeSize, { readonly cpus: string; readonly memory: string }> = {
   small: { cpus: "2", memory: "2g" },
   medium: { cpus: "4", memory: "8g" },
   large: { cpus: "8", memory: "16g" },
 };
 
-const containerName = (id: SandboxId) => `t3-sandbox-${id}`;
-const spareName = (id: SandboxId) => `t3-spare-${id}`;
-const volumeName = (id: SandboxId) => `t3-sandbox-${id}-home`;
+const containerName = (id: CubeId) => `t3-cube-${id}`;
+const spareName = (id: CubeId) => `t3-spare-${id}`;
+const volumeName = (id: CubeId) => `t3-cube-${id}-home`;
 
 const DockerContainer = Schema.Struct({
   Id: Schema.String,
@@ -80,7 +75,7 @@ const decodeInspect = Schema.decodeUnknownEffect(
   Schema.fromJsonString(Schema.Array(DockerContainer)),
 );
 
-const sandboxState = (status: string): SandboxState =>
+const cubeState = (status: string): CubeState =>
   status === "running" || status === "restarting"
     ? "running"
     : status === "dead"
@@ -93,20 +88,20 @@ const recordedEnvironmentId = (value: string | undefined) =>
 /** URL host form of an address: IPv6 literals need brackets. */
 const urlHost = (address: string) => (address.includes(":") ? `[${address}]` : address);
 
-/** A container's labels and state as a sandbox; null for unlabelled containers. */
+/** A container's labels and state as a cube; null for unlabelled containers. */
 const toMachine = (
   container: typeof DockerContainer.Type,
   publishHost: string,
-): SandboxMachine | null => {
+): CubeMachine | null => {
   const labels = container.Config.Labels ?? {};
-  const id = labels[SANDBOX_ID_LABEL];
-  if (labels[SANDBOX_LABEL] !== "1" || id === undefined) return null;
-  const state = sandboxState(container.State.Status);
-  const port = container.NetworkSettings.Ports?.[SANDBOX_PORT]?.[0]?.HostPort;
+  const id = labels[CUBE_ID_LABEL];
+  if (labels[CUBE_LABEL] !== "1" || id === undefined) return null;
+  const state = cubeState(container.State.Status);
+  const port = container.NetworkSettings.Ports?.[CUBE_PORT]?.[0]?.HostPort;
   return {
     id,
-    label: labels[SANDBOX_NAME_LABEL] ?? id,
-    environmentId: recordedEnvironmentId(labels[SANDBOX_ENVIRONMENT_LABEL]),
+    label: labels[CUBE_NAME_LABEL] ?? id,
+    environmentId: recordedEnvironmentId(labels[CUBE_ENVIRONMENT_LABEL]),
     image: container.Config.Image,
     state,
     createdAt: container.Created,
@@ -116,12 +111,12 @@ const toMachine = (
         ? null
         : container.State.FinishedAt,
     httpBaseUrl: state === "running" && port ? `http://${urlHost(publishHost)}:${port}` : null,
-    spare: container.Name === `/${spareName(id)}` ? (labels[SANDBOX_SPARE_LABEL] ?? "") : null,
+    spare: container.Name === `/${spareName(id)}` ? (labels[CUBE_SPARE_LABEL] ?? "") : null,
   };
 };
 
 /** `--env` arguments, plus the process environment that carries sensitive values. */
-const environmentArgs = (environment: ReadonlyArray<SandboxVariable>) => {
+const environmentArgs = (environment: ReadonlyArray<CubeVariable>) => {
   const args: string[] = [];
   const secrets: Record<string, string> = {};
   for (const variable of environment) {
@@ -140,30 +135,30 @@ export const make = Effect.gen(function* () {
   const runner = yield* ProcessRunner.ProcessRunner;
 
   const publishHost = settings.getSettings.pipe(
-    Effect.map((current) => current.sandboxPublishHost),
-    Effect.mapError(() => new SandboxUnavailableError({ reason: "Settings could not be read." })),
+    Effect.map((current) => current.cubePublishHost),
+    Effect.mapError(() => new CubeUnavailableError({ reason: "Settings could not be read." })),
   );
 
   const docker = (
     args: ReadonlyArray<string>,
-    operation: SandboxOperation,
-    id?: SandboxId,
+    operation: CubeOperation,
+    id?: CubeId,
     env?: Record<string, string>,
   ) =>
     runner.run({ command: "docker", args, timeout: "5 minutes", env }).pipe(
       Effect.mapError((cause) =>
         cause._tag === "ProcessSpawnError"
-          ? new SandboxUnavailableError({ reason: "Docker was not found on PATH." })
-          : new SandboxOperationError({ operation, id, cause }),
+          ? new CubeUnavailableError({ reason: "Docker was not found on PATH." })
+          : new CubeOperationError({ operation, id, cause }),
       ),
       Effect.flatMap((result) =>
         result.code === 0
           ? Effect.succeed(result.stdout)
-          : Effect.fail(new SandboxOperationError({ operation, id, cause: result.stderr })),
+          : Effect.fail(new CubeOperationError({ operation, id, cause: result.stderr })),
       ),
     );
 
-  const inspect = (filter: string, operation: SandboxOperation, id?: SandboxId) =>
+  const inspect = (filter: string, operation: CubeOperation, id?: CubeId) =>
     Effect.gen(function* () {
       const ids = (yield* docker(
         ["ps", "--all", "--quiet", "--no-trunc", "--filter", `label=${filter}`],
@@ -176,26 +171,26 @@ export const make = Effect.gen(function* () {
       const host = yield* publishHost;
       const containers = yield* decodeInspect(
         yield* docker(["inspect", ...ids], operation, id),
-      ).pipe(Effect.mapError((cause) => new SandboxOperationError({ operation, id, cause })));
+      ).pipe(Effect.mapError((cause) => new CubeOperationError({ operation, id, cause })));
       return containers.flatMap((container) => toMachine(container, host) ?? []);
     });
 
-  const find: SandboxDriver["find"] = (id, operation) =>
-    inspect(`${SANDBOX_ID_LABEL}=${id}`, operation, id).pipe(
+  const find: CubeDriver["find"] = (id, operation) =>
+    inspect(`${CUBE_ID_LABEL}=${id}`, operation, id).pipe(
       Effect.flatMap(([machine]) =>
-        machine ? Effect.succeed(machine) : Effect.fail(new SandboxNotFoundError({ id })),
+        machine ? Effect.succeed(machine) : Effect.fail(new CubeNotFoundError({ id })),
       ),
     );
 
-  /** The sandbox's container and its Docker status, whichever name it has now. */
-  const containerOf = (id: SandboxId, operation: SandboxOperation) =>
+  /** The cube's container and its Docker status, whichever name it has now. */
+  const containerOf = (id: CubeId, operation: CubeOperation) =>
     docker(
       [
         "ps",
         "--all",
         "--no-trunc",
         "--filter",
-        `label=${SANDBOX_ID_LABEL}=${id}`,
+        `label=${CUBE_ID_LABEL}=${id}`,
         "--format",
         "{{.ID}} {{.State}}",
       ],
@@ -206,12 +201,12 @@ export const make = Effect.gen(function* () {
         const [container, status = ""] = stdout.trim().split(/\s+/);
         return container
           ? Effect.succeed({ container, status })
-          : Effect.fail(new SandboxNotFoundError({ id }));
+          : Effect.fail(new CubeNotFoundError({ id }));
       }),
     );
 
   return {
-    list: inspect(`${SANDBOX_LABEL}=1`, "list"),
+    list: inspect(`${CUBE_LABEL}=1`, "list"),
     find,
     create: ({ id, environmentId, label, image, size, environment, spare }) =>
       Effect.gen(function* () {
@@ -225,15 +220,15 @@ export const make = Effect.gen(function* () {
             "--init",
             "--name",
             spare === null ? containerName(id) : spareName(id),
-            ...(spare === null ? [] : ["--label", `${SANDBOX_SPARE_LABEL}=${spare}`]),
+            ...(spare === null ? [] : ["--label", `${CUBE_SPARE_LABEL}=${spare}`]),
             "--label",
-            `${SANDBOX_LABEL}=1`,
+            `${CUBE_LABEL}=1`,
             "--label",
-            `${SANDBOX_ID_LABEL}=${id}`,
+            `${CUBE_ID_LABEL}=${id}`,
             "--label",
-            `${SANDBOX_NAME_LABEL}=${label}`,
+            `${CUBE_NAME_LABEL}=${label}`,
             "--label",
-            `${SANDBOX_ENVIRONMENT_LABEL}=${environmentId}`,
+            `${CUBE_ENVIRONMENT_LABEL}=${environmentId}`,
             "--hostname",
             containerName(id),
             "--cpus",
@@ -244,7 +239,7 @@ export const make = Effect.gen(function* () {
             `${volumeName(id)}:/home/dev`,
             // Only on the configured address; loopback unless set otherwise.
             "--publish",
-            `${urlHost(host)}::${SANDBOX_PORT}`,
+            `${urlHost(host)}::${CUBE_PORT}`,
             ...env.args,
             image,
           ],
@@ -280,7 +275,7 @@ export const make = Effect.gen(function* () {
     remove: (id) =>
       containerOf(id, "remove").pipe(
         Effect.flatMap(({ container }) => docker(["rm", "--force", container], "remove", id)),
-        Effect.catchTag("SandboxNotFoundError", () => Effect.void),
+        Effect.catchTag("CubeNotFoundError", () => Effect.void),
         Effect.andThen(docker(["volume", "rm", "--force", volumeName(id)], "remove", id)),
         Effect.asVoid,
       ),
@@ -291,7 +286,7 @@ export const make = Effect.gen(function* () {
           docker(["rm", container], "remove", id).pipe(
             Effect.andThen(docker(["volume", "rm", "--force", volumeName(id)], "remove", id)),
             Effect.as(true),
-            Effect.catchTag("SandboxOperationError", () => Effect.succeed(false)),
+            Effect.catchTag("CubeOperationError", () => Effect.succeed(false)),
           ),
         ),
       ),
@@ -301,5 +296,5 @@ export const make = Effect.gen(function* () {
           docker(["exec", "--user", "dev", container, ...command], operation, id),
         ),
       ),
-  } satisfies SandboxDriver;
+  } satisfies CubeDriver;
 });

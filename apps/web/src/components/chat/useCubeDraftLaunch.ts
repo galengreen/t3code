@@ -11,41 +11,41 @@ import {
 } from "../../logicalProject";
 import { appAtomRegistry } from "../../rpc/atomRegistry";
 import { environmentProjects } from "../../state/projects";
-import { connectSandbox, sandboxEnvironment, syncSandboxes } from "../../state/sandbox";
+import { connectCube, cubeEnvironment, syncCubes } from "../../state/cube";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { waitForAtomValue } from "../../state/waitForAtomValue";
 
-/** The project appears once the sandbox has cloned the repository, which large ones make slow. */
-const SANDBOX_PROJECT_TIMEOUT_MS = 300_000;
+/** The project appears once the cube has cloned the repository, which large ones make slow. */
+const CUBE_PROJECT_TIMEOUT_MS = 300_000;
 
-export type SandboxLaunchStageId = "create" | "connect" | "clone" | "send";
+export type CubeLaunchStageId = "create" | "connect" | "clone" | "send";
 
-export interface SandboxLaunchStage {
-  readonly id: SandboxLaunchStageId;
+export interface CubeLaunchStage {
+  readonly id: CubeLaunchStageId;
   readonly status: "pending" | "running" | "done" | "failed";
   readonly startedAt: number | null;
   readonly endedAt: number | null;
 }
 
-/** What a draft that is starting in a new sandbox shows instead of its composer. */
-export type SandboxLaunchState =
+/** What a draft that is starting in a new cube shows instead of its composer. */
+export type CubeLaunchState =
   | { readonly phase: "idle" }
   | {
       readonly phase: "starting" | "failed";
       readonly startedAt: number;
-      readonly stages: ReadonlyArray<SandboxLaunchStage>;
+      readonly stages: ReadonlyArray<CubeLaunchStage>;
       /** Why the launch stopped, in the user's terms. */
       readonly error: string | null;
     };
 
-const STAGE_ORDER: ReadonlyArray<SandboxLaunchStageId> = ["create", "connect", "clone", "send"];
+const STAGE_ORDER: ReadonlyArray<CubeLaunchStageId> = ["create", "connect", "clone", "send"];
 
 /** Marks `id` running from `now`, finishing every earlier stage. */
-export function advanceSandboxLaunch(
-  state: SandboxLaunchState,
-  id: SandboxLaunchStageId,
+export function advanceCubeLaunch(
+  state: CubeLaunchState,
+  id: CubeLaunchStageId,
   now: number,
-): SandboxLaunchState {
+): CubeLaunchState {
   const startedAt = state.phase === "idle" ? now : state.startedAt;
   const previous = state.phase === "idle" ? [] : state.stages;
   const target = STAGE_ORDER.indexOf(id);
@@ -71,11 +71,11 @@ export function advanceSandboxLaunch(
 }
 
 /** Fails the running stage with a message, keeping finished stages as they were. */
-export function failSandboxLaunch(
-  state: SandboxLaunchState,
+export function failCubeLaunch(
+  state: CubeLaunchState,
   error: string,
   now: number,
-): SandboxLaunchState {
+): CubeLaunchState {
   if (state.phase === "idle") return state;
   return {
     ...state,
@@ -95,16 +95,16 @@ const failureMessage = (result: Parameters<typeof squashAtomCommandFailure>[0]) 
 };
 
 /**
- * Creates a sandbox for a draft, connects to it, and resolves the project the
- * draft should move to: the sandbox's copy of the same logical project, which
- * appears once the sandbox has cloned it. The caller sends the queued message
+ * Creates a cube for a draft, connects to it, and resolves the project the
+ * draft should move to: the cube's copy of the same logical project, which
+ * appears once the cube has cloned it. The caller sends the queued message
  * there, then calls `finish`.
  */
-export function useSandboxDraftLaunch() {
-  const create = useAtomCommand(sandboxEnvironment.create, { reportFailure: false });
-  const connect = useAtomCommand(connectSandbox, { reportFailure: false });
-  const sync = useAtomCommand(syncSandboxes, { reportFailure: false });
-  const [state, setState] = useState<SandboxLaunchState>({ phase: "idle" });
+export function useCubeDraftLaunch() {
+  const create = useAtomCommand(cubeEnvironment.create, { reportFailure: false });
+  const connect = useAtomCommand(connectCube, { reportFailure: false });
+  const sync = useAtomCommand(syncCubes, { reportFailure: false });
+  const [state, setState] = useState<CubeLaunchState>({ phase: "idle" });
 
   const launch = async (input: {
     readonly hostEnvironmentId: EnvironmentId;
@@ -112,9 +112,9 @@ export function useSandboxDraftLaunch() {
     readonly logicalProjectKey: string;
     readonly projectGroupingSettings: ReturnType<typeof selectProjectGroupingSettings>;
   }): Promise<{ environmentId: EnvironmentId; projectId: ProjectId } | null> => {
-    setState(advanceSandboxLaunch({ phase: "idle" }, "create", Date.now()));
+    setState(advanceCubeLaunch({ phase: "idle" }, "create", Date.now()));
     const fail = (error: string) => {
-      setState((current) => failSandboxLaunch(current, error, Date.now()));
+      setState((current) => failCubeLaunch(current, error, Date.now()));
       return null;
     };
 
@@ -127,16 +127,16 @@ export function useSandboxDraftLaunch() {
       return fail(failureMessage(created));
     }
 
-    setState((current) => advanceSandboxLaunch(current, "connect", Date.now()));
+    setState((current) => advanceCubeLaunch(current, "connect", Date.now()));
     const connected = await connect({
       hostEnvironmentId: input.hostEnvironmentId,
-      sandbox: created.value,
+      cube: created.value,
     });
     if (connected._tag === "Failure") return fail(failureMessage(connected));
     const environmentId = connected.value;
-    // Thread menus find the new sandbox through the host's list.
+    // Thread menus find the new cube through the host's list.
     void sync(input.hostEnvironmentId);
-    setState((current) => advanceSandboxLaunch(current, "clone", Date.now()));
+    setState((current) => advanceCubeLaunch(current, "clone", Date.now()));
     const matches = (project: { environmentId: EnvironmentId }) =>
       project.environmentId === environmentId &&
       deriveLogicalProjectKeyFromSettings(
@@ -147,13 +147,13 @@ export function useSandboxDraftLaunch() {
       registry: appAtomRegistry,
       atom: environmentProjects.projectsAtom,
       predicate: (projects) => projects.some(matches),
-      timeoutMs: SANDBOX_PROJECT_TIMEOUT_MS,
+      timeoutMs: CUBE_PROJECT_TIMEOUT_MS,
     });
     const project = appAtomRegistry.get(environmentProjects.projectsAtom).find(matches);
     if (!found || !project) {
       return fail("The cube is running, but the repository did not finish cloning in it.");
     }
-    setState((current) => advanceSandboxLaunch(current, "send", Date.now()));
+    setState((current) => advanceCubeLaunch(current, "send", Date.now()));
     return { environmentId, projectId: project.id };
   };
 

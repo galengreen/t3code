@@ -1,42 +1,42 @@
 /**
- * Creates and manages sandboxes: machines that each run their own T3 server,
+ * Creates and manages cubes: machines that each run their own T3 server,
  * so a paired client sees a complete, isolated environment. Where the machines
- * run is a `SandboxDriver`'s concern; this service owns what is the same
- * everywhere. New sandboxes go to the `sandboxBackend` setting's driver, and
+ * run is a `CubeDriver`'s concern; this service owns what is the same
+ * everywhere. New cubes go to the `cubeBackend` setting's driver, and
  * each existing one is managed by whichever driver knows it.
  *
- * The configured image (`packaging/sandbox` builds the reference one) must
+ * The configured image (`packaging/cube` builds the reference one) must
  * start a T3 server on port 7777 as its `dev` user and put two commands on
- * PATH: `t3`, which pairing uses to mint a credential inside the sandbox, and
- * `t3-sandbox-clone <url>`, which clones a repository in the background and
- * adds it as a project. It reads `T3_SANDBOX_LABEL` (the environment's name)
+ * PATH: `t3`, which pairing uses to mint a credential inside the cube, and
+ * `t3-cube-clone <url>`, which clones a repository in the background and
+ * adds it as a project. It reads `T3_CUBE_LABEL` (the environment's name)
  * and `T3_ENVIRONMENT_ID` (written as the server's environment id before its
- * first start, so the host knows it even while the sandbox sleeps). Every
- * sandbox also starts with the host's `sandboxEnvironment` variables, such as
+ * first start, so the host knows it even while the cube sleeps). Every
+ * cube also starts with the host's `cubeEnvironment` variables, such as
  * an agent login token.
  *
- * With `sandboxKeepReady` on, the host keeps one spare: a sandbox booted with
+ * With `cubeKeepReady` on, the host keeps one spare: a cube booted with
  * the current settings and parked (suspended where the backend can), with no
  * repository yet. Creating claims it, wakes it, and starts its clone, which
  * takes seconds instead of a full boot. Changing the settings that shape a
- * sandbox replaces the spare, since its variables are fixed at creation.
+ * cube replaces the spare, since its variables are fixed at creation.
  */
 import {
-  SandboxNotFoundError,
-  SandboxNotRunningError,
-  SandboxOperationError,
-  SandboxUnavailableError,
+  CubeNotFoundError,
+  CubeNotRunningError,
+  CubeOperationError,
+  CubeUnavailableError,
   EnvironmentId,
-  type SandboxBackend,
-  type SandboxCreateInput,
-  type SandboxError,
-  type SandboxFlyAccount,
-  type SandboxFlyAccountInput,
-  type SandboxId,
-  type SandboxIdInput,
-  type SandboxPairing,
-  type SandboxSummary,
-  type ServerSettings as SandboxSettings,
+  type CubeBackend,
+  type CubeCreateInput,
+  type CubeError,
+  type CubeFlyAccount,
+  type CubeFlyAccountInput,
+  type CubeId,
+  type CubeIdInput,
+  type CubePairing,
+  type CubeSummary,
+  type ServerSettings as CubeSettings,
 } from "@t3tools/contracts";
 import { waitForHttpReady } from "@t3tools/shared/httpReadiness";
 import * as NodeCrypto from "node:crypto";
@@ -57,8 +57,8 @@ import { HttpClient } from "effect/unstable/http";
 
 import * as ServerConfig from "../config.ts";
 import * as ServerSettings from "../serverSettings.ts";
-import { SandboxDrivers, type SandboxMachine, type SandboxOperation } from "./SandboxDriver.ts";
-import { flyAccount } from "./FlySandboxDriver.ts";
+import { CubeDrivers, type CubeMachine, type CubeOperation } from "./CubeDriver.ts";
+import { flyAccount } from "./FlyCubeDriver.ts";
 
 /** First start clones the repository and boots a server, so it gets a while. */
 const READY_TIMEOUT_MS = 180_000;
@@ -69,7 +69,7 @@ const decodePairing = Schema.decodeUnknownEffect(Schema.fromJsonString(PairingCr
 
 const EnvironmentDescriptor = Schema.Struct({ environmentId: EnvironmentId });
 
-/** Long enough for a client that was away for a while to still learn a sandbox went. */
+/** Long enough for a client that was away for a while to still learn a cube went. */
 const REMOVED_RETENTION = Duration.days(90);
 const RemovedRecords = Schema.fromJsonString(
   Schema.Array(Schema.Struct({ environmentId: EnvironmentId, removedAt: Schema.Number })),
@@ -86,80 +86,78 @@ const decodeDescriptor = Schema.decodeUnknownEffect(EnvironmentDescriptor);
  */
 const SPARE_SETTLE = Duration.minutes(1);
 
-/** A spare is named before anyone knows what it will be for, so every sandbox is named by id. */
-const sandboxLabel = (id: SandboxId) => `Cube ${id.slice(0, 6)}`;
+/** A spare is named before anyone knows what it will be for, so every cube is named by id. */
+const cubeLabel = (id: CubeId) => `Cube ${id.slice(0, 6)}`;
 
 /**
- * The settings a sandbox's machine is made with. A spare made under a
+ * The settings a cube's machine is made with. A spare made under a
  * different fingerprint would start with stale variables or the wrong image.
  */
-const spareFingerprint = (current: SandboxSettings) =>
+const spareFingerprint = (current: CubeSettings) =>
   NodeCrypto.createHash("sha256")
     .update(
       JSON.stringify([
-        current.sandboxBackend,
-        current.sandboxImage,
-        current.sandboxSize,
-        current.sandboxSleepAfterMinutes,
-        current.sandboxEnvironment,
-        current.sandboxBackend === "fly"
-          ? [current.sandboxFly.organization, current.sandboxFly.region]
-          : current.sandboxPublishHost,
+        current.cubeBackend,
+        current.cubeImage,
+        current.cubeSize,
+        current.cubeSleepAfterMinutes,
+        current.cubeEnvironment,
+        current.cubeBackend === "fly"
+          ? [current.cubeFly.organization, current.cubeFly.region]
+          : current.cubePublishHost,
       ]),
     )
     .digest("hex")
     .slice(0, 16);
 
-export class SandboxService extends Context.Service<
-  SandboxService,
+export class CubeService extends Context.Service<
+  CubeService,
   {
-    readonly list: Effect.Effect<ReadonlyArray<SandboxSummary>, SandboxError>;
+    readonly list: Effect.Effect<ReadonlyArray<CubeSummary>, CubeError>;
     /**
-     * Creates and starts a sandbox, or claims the spare, returning once its T3
+     * Creates and starts a cube, or claims the spare, returning once its T3
      * server answers. Its repository is still cloning then; the project
      * appears when the clone finishes.
      */
-    readonly create: (input: SandboxCreateInput) => Effect.Effect<SandboxSummary, SandboxError>;
-    readonly start: (input: SandboxIdInput) => Effect.Effect<SandboxSummary, SandboxError>;
-    /** Stops the sandbox; its files and conversations are kept. */
-    readonly stop: (input: SandboxIdInput) => Effect.Effect<SandboxSummary, SandboxError>;
-    /** Deletes the sandbox and its files, including any unshipped work. */
-    readonly remove: (input: SandboxIdInput) => Effect.Effect<void, SandboxError>;
-    /** Mints a one-time pairing credential inside a running sandbox. */
-    readonly pair: (input: SandboxIdInput) => Effect.Effect<SandboxPairing, SandboxError>;
+    readonly create: (input: CubeCreateInput) => Effect.Effect<CubeSummary, CubeError>;
+    readonly start: (input: CubeIdInput) => Effect.Effect<CubeSummary, CubeError>;
+    /** Stops the cube; its files and conversations are kept. */
+    readonly stop: (input: CubeIdInput) => Effect.Effect<CubeSummary, CubeError>;
+    /** Deletes the cube and its files, including any unshipped work. */
+    readonly remove: (input: CubeIdInput) => Effect.Effect<void, CubeError>;
+    /** Mints a one-time pairing credential inside a running cube. */
+    readonly pair: (input: CubeIdInput) => Effect.Effect<CubePairing, CubeError>;
     /**
-     * Deletes sandboxes that have been stopped longer than the
-     * `sandboxDeleteAfterDays` setting allows, returning their ids.
+     * Deletes cubes that have been stopped longer than the
+     * `cubeDeleteAfterDays` setting allows, returning their ids.
      */
-    readonly pruneStopped: Effect.Effect<ReadonlyArray<SandboxId>, SandboxError>;
+    readonly pruneStopped: Effect.Effect<ReadonlyArray<CubeId>, CubeError>;
     /**
-     * Environments of sandboxes deleted in the last 90 days, so every client
+     * Environments of cubes deleted in the last 90 days, so every client
      * can forget its connection to one, whoever or whatever deleted it.
      */
-    readonly removedEnvironments: Effect.Effect<ReadonlyArray<EnvironmentId>, SandboxError>;
+    readonly removedEnvironments: Effect.Effect<ReadonlyArray<EnvironmentId>, CubeError>;
     /**
      * Leaves exactly one parked spare made with the current settings, or none
-     * when `sandboxKeepReady` or sandboxes are off. Other spares are deleted.
+     * when `cubeKeepReady` or cubes are off. Other spares are deleted.
      */
-    readonly keepSpareReady: Effect.Effect<void, SandboxError>;
+    readonly keepSpareReady: Effect.Effect<void, CubeError>;
     /** What a Fly token (the given one, else the saved one) can reach. */
-    readonly flyAccount: (
-      input: SandboxFlyAccountInput,
-    ) => Effect.Effect<SandboxFlyAccount, SandboxError>;
+    readonly flyAccount: (input: CubeFlyAccountInput) => Effect.Effect<CubeFlyAccount, CubeError>;
   }
->()("t3/sandbox/SandboxService") {}
+>()("t3/cube/CubeService") {}
 
-const BACKENDS: ReadonlyArray<SandboxBackend> = ["docker", "fly"];
+const BACKENDS: ReadonlyArray<CubeBackend> = ["docker", "fly"];
 
 const make = Effect.gen(function* () {
   const settings = yield* ServerSettings.ServerSettingsService;
-  const drivers = yield* SandboxDrivers;
+  const drivers = yield* CubeDrivers;
   const httpClient = yield* HttpClient.HttpClient;
   const crypto = yield* Crypto.Crypto;
   const fileSystem = yield* FileSystem.FileSystem;
   const removedPath = (yield* Path.Path).join(
     (yield* ServerConfig.ServerConfig).stateDir,
-    "sandbox-removed.json",
+    "cube-removed.json",
   );
   const removedLock = yield* Semaphore.make(1);
   /** Held while choosing a spare to claim or delete, so no spare is both. */
@@ -168,7 +166,7 @@ const make = Effect.gen(function* () {
   const spareLock = yield* Semaphore.make(1);
   const scope = yield* Effect.scope;
 
-  /** Deleted sandboxes' environments still within the retention window. */
+  /** Deleted cubes' environments still within the retention window. */
   const readRemoved = Effect.gen(function* () {
     const now = yield* Clock.currentTimeMillis;
     const records = yield* fileSystem.readFileString(removedPath).pipe(
@@ -180,7 +178,7 @@ const make = Effect.gen(function* () {
     );
   });
 
-  /** Remembers a deleted sandbox's environment; losing the note only leaves a stale connection. */
+  /** Remembers a deleted cube's environment; losing the note only leaves a stale connection. */
   const recordRemoved = (environmentId: EnvironmentId | null) =>
     environmentId === null
       ? Effect.void
@@ -200,60 +198,54 @@ const make = Effect.gen(function* () {
           )
           .pipe(
             Effect.catchCause((cause) =>
-              Effect.logWarning("Could not record a deleted sandbox", { cause }),
+              Effect.logWarning("Could not record a deleted cube", { cause }),
             ),
           );
 
   const readSettings = settings.getSettings.pipe(
-    Effect.mapError(() => new SandboxUnavailableError({ reason: "Settings could not be read." })),
+    Effect.mapError(() => new CubeUnavailableError({ reason: "Settings could not be read." })),
   );
 
-  /** Current settings, once sandboxes are switched on. */
+  /** Current settings, once cubes are switched on. */
   const ensureAvailable = Effect.gen(function* () {
     const current = yield* readSettings;
-    if (!current.enableSandboxes) {
-      return yield* new SandboxUnavailableError({
+    if (!current.enableCubes) {
+      return yield* new CubeUnavailableError({
         reason: "Cubes are turned off for this server.",
       });
     }
     return current;
   });
 
-  /** The selected backend first; another backend's failures only mean it has no such sandbox. */
-  const ordered = (selected: SandboxBackend) => [
+  /** The selected backend first; another backend's failures only mean it has no such cube. */
+  const ordered = (selected: CubeBackend) => [
     selected,
     ...BACKENDS.filter((backend) => backend !== selected),
   ];
 
-  /** Which backend holds a sandbox, and the sandbox as it is now. */
-  const locate = Effect.fn("SandboxService.locate")(function* (
-    id: SandboxId,
-    operation: SandboxOperation,
-  ) {
-    const { sandboxBackend } = yield* ensureAvailable;
-    for (const backend of ordered(sandboxBackend)) {
+  /** Which backend holds a cube, and the cube as it is now. */
+  const locate = Effect.fn("CubeService.locate")(function* (id: CubeId, operation: CubeOperation) {
+    const { cubeBackend } = yield* ensureAvailable;
+    for (const backend of ordered(cubeBackend)) {
       const found = yield* drivers[backend].find(id, operation).pipe(
         Effect.map((machine) => ({ backend, machine })),
         Effect.catchIf(
-          (error) => error._tag === "SandboxNotFoundError" || backend !== sandboxBackend,
+          (error) => error._tag === "CubeNotFoundError" || backend !== cubeBackend,
           () => Effect.succeed(null),
         ),
       );
       if (found) return found;
     }
-    return yield* new SandboxNotFoundError({ id });
+    return yield* new CubeNotFoundError({ id });
   });
 
   /**
-   * A machine as clients see it. A Docker sandbox's address is only given once
+   * A machine as clients see it. A Docker cube's address is only given once
    * its server answers, so nothing pairs with one that is still booting. A Fly
-   * sandbox is never contacted here: a request would wake a sleeping one, and
+   * cube is never contacted here: a request would wake a sleeping one, and
    * its address and environment are known from Fly alone.
    */
-  const summarize = (
-    backend: SandboxBackend,
-    machine: SandboxMachine,
-  ): Effect.Effect<SandboxSummary> =>
+  const summarize = (backend: CubeBackend, machine: CubeMachine): Effect.Effect<CubeSummary> =>
     machine.httpBaseUrl === null || backend === "fly"
       ? Effect.succeed({ ...machine, backend })
       : httpClient.get(`${machine.httpBaseUrl}/.well-known/t3/environment`).pipe(
@@ -268,10 +260,10 @@ const make = Effect.gen(function* () {
           Effect.orElseSucceed(() => ({ ...machine, backend, httpBaseUrl: null })),
         );
 
-  const waitUntilReady = (machine: SandboxMachine, operation: SandboxOperation) =>
+  const waitUntilReady = (machine: CubeMachine, operation: CubeOperation) =>
     machine.httpBaseUrl === null
       ? Effect.fail(
-          new SandboxOperationError({
+          new CubeOperationError({
             operation,
             id: machine.id,
             cause: "Cube is not running.",
@@ -282,25 +274,24 @@ const make = Effect.gen(function* () {
           path: "/.well-known/t3/environment",
           timeoutMs: READY_TIMEOUT_MS,
           intervalMs: 500,
-          makeError: (info) =>
-            new SandboxOperationError({ operation, id: machine.id, cause: info }),
+          makeError: (info) => new CubeOperationError({ operation, id: machine.id, cause: info }),
         }).pipe(Effect.provideService(HttpClient.HttpClient, httpClient));
 
-  /** Waits for a just-started sandbox's server, then reports it. */
-  const ready = (backend: SandboxBackend, id: SandboxId, operation: SandboxOperation) =>
+  /** Waits for a just-started cube's server, then reports it. */
+  const ready = (backend: CubeBackend, id: CubeId, operation: CubeOperation) =>
     drivers[backend].find(id, operation).pipe(
       Effect.tap((machine) => waitUntilReady(machine, operation)),
       Effect.flatMap(() => drivers[backend].find(id, operation)),
       Effect.flatMap((machine) => summarize(backend, machine)),
     );
 
-  const list: SandboxService["Service"]["list"] = Effect.gen(function* () {
-    const { sandboxBackend } = yield* ensureAvailable;
+  const list: CubeService["Service"]["list"] = Effect.gen(function* () {
+    const { cubeBackend } = yield* ensureAvailable;
     const machines = yield* Effect.forEach(
       BACKENDS,
       (backend) =>
         drivers[backend].list.pipe(
-          backend === sandboxBackend ? (listed) => listed : Effect.orElseSucceed(() => []),
+          backend === cubeBackend ? (listed) => listed : Effect.orElseSucceed(() => []),
           Effect.map((listed) => listed.map((machine) => ({ backend, machine }))),
         ),
       { concurrency: "unbounded" },
@@ -310,39 +301,39 @@ const make = Effect.gen(function* () {
       ({ backend, machine }) => summarize(backend, machine),
       { concurrency: "unbounded" },
     );
-  }).pipe(Effect.withSpan("SandboxService.list"));
+  }).pipe(Effect.withSpan("CubeService.list"));
 
   const newIdentity = Effect.gen(function* () {
     const uuid = yield* crypto.randomUUIDv4;
     const environmentId = EnvironmentId.make(yield* crypto.randomUUIDv4);
     return { id: uuid.replaceAll("-", "").slice(0, 12), environmentId };
-  }).pipe(Effect.mapError((cause) => new SandboxOperationError({ operation: "create", cause })));
+  }).pipe(Effect.mapError((cause) => new CubeOperationError({ operation: "create", cause })));
 
   /** Makes and boots a machine under the current settings; a spare when given a fingerprint. */
-  const makeMachine = Effect.fn("SandboxService.makeMachine")(function* (
-    current: SandboxSettings,
+  const makeMachine = Effect.fn("CubeService.makeMachine")(function* (
+    current: CubeSettings,
     spare: string | null,
   ) {
     const { id, environmentId } = yield* newIdentity;
-    const label = sandboxLabel(id);
-    yield* drivers[current.sandboxBackend].create({
+    const label = cubeLabel(id);
+    yield* drivers[current.cubeBackend].create({
       id,
       environmentId,
       label,
-      image: current.sandboxImage,
-      size: current.sandboxSize,
+      image: current.cubeImage,
+      size: current.cubeSize,
       spare,
       // The image's own variables come last so the host's list cannot replace them.
       environment: [
-        ...current.sandboxEnvironment,
+        ...current.cubeEnvironment,
         { name: "T3_HOST", value: "0.0.0.0", sensitive: false },
-        { name: "T3_SANDBOX_LABEL", value: label, sensitive: false },
+        { name: "T3_CUBE_LABEL", value: label, sensitive: false },
         { name: "T3_ENVIRONMENT_ID", value: environmentId, sensitive: false },
-        ...(current.sandboxSleepAfterMinutes > 0
+        ...(current.cubeSleepAfterMinutes > 0
           ? [
               {
                 name: "T3CODE_SLEEP_WHEN_IDLE_MINUTES",
-                value: String(current.sandboxSleepAfterMinutes),
+                value: String(current.cubeSleepAfterMinutes),
                 sensitive: false,
               },
             ]
@@ -365,13 +356,13 @@ const make = Effect.gen(function* () {
   ).pipe(Effect.map((spares) => spares.flat()));
 
   /** Claims the parked spare that matches the current settings, if there is one. */
-  const claimSpare = (current: SandboxSettings) =>
+  const claimSpare = (current: CubeSettings) =>
     claimLock.withPermits(1)(
       Effect.gen(function* () {
         const fingerprint = spareFingerprint(current);
         const spare = (yield* listSpares).find(
           ({ backend, machine }) =>
-            backend === current.sandboxBackend &&
+            backend === current.cubeBackend &&
             machine.spare === fingerprint &&
             machine.state === "stopped",
         );
@@ -381,20 +372,20 @@ const make = Effect.gen(function* () {
       }),
     );
 
-  const keepSpareReady: SandboxService["Service"]["keepSpareReady"] = spareLock
+  const keepSpareReady: CubeService["Service"]["keepSpareReady"] = spareLock
     .withPermits(1)(
       Effect.gen(function* () {
         const current = yield* readSettings;
         const wanted =
-          current.enableSandboxes && current.sandboxKeepReady ? spareFingerprint(current) : null;
+          current.enableCubes && current.cubeKeepReady ? spareFingerprint(current) : null;
         const kept = yield* claimLock.withPermits(1)(
           Effect.gen(function* () {
-            let keep: SandboxId | null = null;
+            let keep: CubeId | null = null;
             for (const { backend, machine } of yield* listSpares) {
               if (
                 keep === null &&
                 wanted !== null &&
-                backend === current.sandboxBackend &&
+                backend === current.cubeBackend &&
                 machine.spare === wanted &&
                 machine.state !== "failed"
               ) {
@@ -405,14 +396,14 @@ const make = Effect.gen(function* () {
                 continue;
               }
               yield* drivers[backend].remove(machine.id);
-              yield* Effect.logInfo("Deleted an outdated spare sandbox", { id: machine.id });
+              yield* Effect.logInfo("Deleted an outdated spare cube", { id: machine.id });
             }
             return keep;
           }),
         );
         if (wanted === null || kept !== null) return;
 
-        const backend = current.sandboxBackend;
+        const backend = current.cubeBackend;
         const id = yield* makeMachine(current, wanted);
         yield* drivers[backend].find(id, "create").pipe(
           Effect.flatMap((machine) => waitUntilReady(machine, "create")),
@@ -422,29 +413,29 @@ const make = Effect.gen(function* () {
           // create exits right after claiming), is no use; remove it now.
           Effect.onError(() => drivers[backend].remove(id).pipe(Effect.ignore)),
         );
-        yield* Effect.logInfo("A spare sandbox is ready", { id, backend });
+        yield* Effect.logInfo("A spare cube is ready", { id, backend });
       }),
     )
-    .pipe(Effect.withSpan("SandboxService.keepSpareReady"));
+    .pipe(Effect.withSpan("CubeService.keepSpareReady"));
 
   /** Refills the spare after this request, without making the request wait for it. */
   const refillSpare = keepSpareReady.pipe(
-    Effect.catchCause((cause) => Effect.logWarning("Could not make a spare sandbox", { cause })),
+    Effect.catchCause((cause) => Effect.logWarning("Could not make a spare cube", { cause })),
     Effect.forkIn(scope),
   );
 
-  const create: SandboxService["Service"]["create"] = Effect.fn("SandboxService.create")(
+  const create: CubeService["Service"]["create"] = Effect.fn("CubeService.create")(
     function* (input) {
       const current = yield* ensureAvailable;
-      const backend = current.sandboxBackend;
-      /** Starts the clone, which detaches inside the sandbox and returns at once. */
-      const startClone = (sandbox: SandboxSummary) =>
+      const backend = current.cubeBackend;
+      /** Starts the clone, which detaches inside the cube and returns at once. */
+      const startClone = (cube: CubeSummary) =>
         input.repositoryUrl === undefined
           ? Effect.void
           : drivers[backend]
-              .exec(sandbox.id, ["t3-sandbox-clone", input.repositoryUrl], "clone")
+              .exec(cube.id, ["t3-cube-clone", input.repositoryUrl], "clone")
               .pipe(Effect.asVoid);
-      const claimed = current.sandboxKeepReady
+      const claimed = current.cubeKeepReady
         ? yield* claimSpare(current).pipe(
             Effect.flatMap((id) =>
               id === null
@@ -458,61 +449,55 @@ const make = Effect.gen(function* () {
                   ),
             ),
             Effect.catchCause((cause) =>
-              Effect.logWarning("Could not use the spare sandbox; making a new one", {
+              Effect.logWarning("Could not use the spare cube; making a new one", {
                 cause,
               }).pipe(Effect.as(null)),
             ),
           )
         : null;
-      const sandbox =
+      const cube =
         claimed ??
         (yield* ready(backend, yield* makeMachine(current, null), "create").pipe(
           Effect.tap(startClone),
         ));
-      if (current.sandboxKeepReady) yield* refillSpare;
-      return sandbox;
+      if (current.cubeKeepReady) yield* refillSpare;
+      return cube;
     },
   );
 
-  const start: SandboxService["Service"]["start"] = Effect.fn("SandboxService.start")(function* ({
-    id,
-  }) {
+  const start: CubeService["Service"]["start"] = Effect.fn("CubeService.start")(function* ({ id }) {
     const { backend } = yield* locate(id, "start");
     yield* drivers[backend].start(id);
     return yield* ready(backend, id, "start");
   });
 
-  const stop: SandboxService["Service"]["stop"] = Effect.fn("SandboxService.stop")(function* ({
-    id,
-  }) {
+  const stop: CubeService["Service"]["stop"] = Effect.fn("CubeService.stop")(function* ({ id }) {
     const { backend } = yield* locate(id, "stop");
     yield* drivers[backend].stop(id);
     return yield* summarize(backend, yield* drivers[backend].find(id, "stop"));
   });
 
-  const remove: SandboxService["Service"]["remove"] = Effect.fn("SandboxService.remove")(
-    function* ({ id }) {
-      const { backend, machine } = yield* locate(id, "remove");
-      yield* drivers[backend].remove(id);
-      yield* recordRemoved(machine.environmentId);
-    },
-  );
-
-  const pair: SandboxService["Service"]["pair"] = Effect.fn("SandboxService.pair")(function* ({
+  const remove: CubeService["Service"]["remove"] = Effect.fn("CubeService.remove")(function* ({
     id,
   }) {
+    const { backend, machine } = yield* locate(id, "remove");
+    yield* drivers[backend].remove(id);
+    yield* recordRemoved(machine.environmentId);
+  });
+
+  const pair: CubeService["Service"]["pair"] = Effect.fn("CubeService.pair")(function* ({ id }) {
     const located = yield* locate(id, "pair");
     const { backend } = located;
     let machine = located.machine;
     if (machine.state !== "running") {
-      // A Fly sandbox is woken to be paired (a device seeing it for the first
+      // A Fly cube is woken to be paired (a device seeing it for the first
       // time); a stopped Docker one has to be started by the user.
-      if (backend !== "fly") return yield* new SandboxNotRunningError({ id });
+      if (backend !== "fly") return yield* new CubeNotRunningError({ id });
       yield* drivers[backend].start(id);
       yield* waitUntilReady(machine, "pair");
       machine = yield* drivers[backend].find(id, "pair");
     }
-    if (machine.httpBaseUrl === null) return yield* new SandboxNotRunningError({ id });
+    if (machine.httpBaseUrl === null) return yield* new CubeNotRunningError({ id });
     const stdout = yield* drivers[backend].exec(
       id,
       [
@@ -524,30 +509,32 @@ const make = Effect.gen(function* () {
         "--ttl",
         PAIRING_TTL,
         "--label",
-        "t3 sandbox host",
+        "t3 cube host",
       ],
       "pair",
     );
     const pairing = yield* decodePairing(stdout).pipe(
-      Effect.mapError((cause) => new SandboxOperationError({ operation: "pair", id, cause })),
+      Effect.mapError((cause) => new CubeOperationError({ operation: "pair", id, cause })),
     );
     return { httpBaseUrl: machine.httpBaseUrl, ...pairing };
   });
 
-  const flyAccountOf: SandboxService["Service"]["flyAccount"] = Effect.fn(
-    "SandboxService.flyAccount",
-  )(function* (input) {
-    const token = input.apiToken ?? (yield* readSettings).sandboxFly.apiToken;
-    if (!token) return yield* new SandboxUnavailableError({ reason: "Add a Fly API token first." });
-    return yield* flyAccount(token).pipe(Effect.provideService(HttpClient.HttpClient, httpClient));
-  });
+  const flyAccountOf: CubeService["Service"]["flyAccount"] = Effect.fn("CubeService.flyAccount")(
+    function* (input) {
+      const token = input.apiToken ?? (yield* readSettings).cubeFly.apiToken;
+      if (!token) return yield* new CubeUnavailableError({ reason: "Add a Fly API token first." });
+      return yield* flyAccount(token).pipe(
+        Effect.provideService(HttpClient.HttpClient, httpClient),
+      );
+    },
+  );
 
-  const pruneStopped: SandboxService["Service"]["pruneStopped"] = Effect.gen(function* () {
-    const { sandboxDeleteAfterDays } = yield* ensureAvailable;
-    if (sandboxDeleteAfterDays === 0) return [];
+  const pruneStopped: CubeService["Service"]["pruneStopped"] = Effect.gen(function* () {
+    const { cubeDeleteAfterDays } = yield* ensureAvailable;
+    if (cubeDeleteAfterDays === 0) return [];
     const cutoff =
-      (yield* Clock.currentTimeMillis) - Duration.toMillis(Duration.days(sandboxDeleteAfterDays));
-    const removed: SandboxId[] = [];
+      (yield* Clock.currentTimeMillis) - Duration.toMillis(Duration.days(cubeDeleteAfterDays));
+    const removed: CubeId[] = [];
     for (const backend of BACKENDS) {
       // A backend that cannot be listed (Fly without a token) has nothing to prune.
       const machines = yield* drivers[backend].list.pipe(Effect.orElseSucceed(() => []));
@@ -556,10 +543,10 @@ const make = Effect.gen(function* () {
         const stoppedAt = machine.stoppedAt === null ? NaN : Date.parse(machine.stoppedAt);
         if (machine.state !== "stopped" || !(stoppedAt < cutoff)) continue;
         // Something may wake it after this list was read; the backend refuses
-        // to delete a running sandbox, and then it is kept.
+        // to delete a running cube, and then it is kept.
         if (!(yield* drivers[backend].removeIfStopped(machine.id))) continue;
         yield* recordRemoved(machine.environmentId);
-        yield* Effect.logInfo("Deleted a long-stopped sandbox", {
+        yield* Effect.logInfo("Deleted a long-stopped cube", {
           id: machine.id,
           label: machine.label,
           stoppedAt: machine.stoppedAt,
@@ -568,9 +555,9 @@ const make = Effect.gen(function* () {
       }
     }
     return removed;
-  }).pipe(Effect.withSpan("SandboxService.pruneStopped"));
+  }).pipe(Effect.withSpan("CubeService.pruneStopped"));
 
-  return SandboxService.of({
+  return CubeService.of({
     list,
     create,
     start,
@@ -587,28 +574,28 @@ const make = Effect.gen(function* () {
   });
 });
 
-export const layer = Layer.effect(SandboxService, make);
+export const layer = Layer.effect(CubeService, make);
 
 /**
  * Keeps the spare in step with the settings: made on start, replaced when a
- * setting that shapes sandboxes changes, deleted when keeping one or
- * sandboxes are turned off, and checked hourly in case one was lost. Servers
- * that never had sandboxes on never look for spares.
+ * setting that shapes cubes changes, deleted when keeping one or
+ * cubes are turned off, and checked hourly in case one was lost. Servers
+ * that never had cubes on never look for spares.
  */
 export const sparesLayer = Layer.effectDiscard(
   Effect.gen(function* () {
-    const sandboxes = yield* SandboxService;
+    const cubes = yield* CubeService;
     const settings = yield* ServerSettings.ServerSettingsService;
     const wasEnabled = yield* Ref.make(false);
     const refill = Effect.gen(function* () {
-      const { enableSandboxes } = yield* settings.getSettings;
-      // One more pass after sandboxes are turned off deletes the spare.
-      if (enableSandboxes || (yield* Ref.getAndSet(wasEnabled, enableSandboxes))) {
-        yield* Ref.set(wasEnabled, enableSandboxes);
-        yield* sandboxes.keepSpareReady;
+      const { enableCubes } = yield* settings.getSettings;
+      // One more pass after cubes are turned off deletes the spare.
+      if (enableCubes || (yield* Ref.getAndSet(wasEnabled, enableCubes))) {
+        yield* Ref.set(wasEnabled, enableCubes);
+        yield* cubes.keepSpareReady;
       }
     }).pipe(
-      Effect.catchCause((cause) => Effect.logWarning("Could not make a spare sandbox", { cause })),
+      Effect.catchCause((cause) => Effect.logWarning("Could not make a spare cube", { cause })),
     );
     yield* Stream.merge(
       settings.streamChanges.pipe(Stream.debounce("2 seconds")),
@@ -621,15 +608,15 @@ export const sparesLayer = Layer.effectDiscard(
 );
 
 /**
- * Prunes long-stopped sandboxes an hour after start and hourly after that.
- * Quietly does nothing on servers with sandboxes turned off.
+ * Prunes long-stopped cubes an hour after start and hourly after that.
+ * Quietly does nothing on servers with cubes turned off.
  */
 export const pruneLayer = Layer.effectDiscard(
   Effect.gen(function* () {
-    const sandboxes = yield* SandboxService;
-    yield* sandboxes.pruneStopped.pipe(
-      Effect.catchTag("SandboxUnavailableError", () => Effect.succeed([])),
-      Effect.catchCause((cause) => Effect.logWarning("Sandbox pruning failed", { cause })),
+    const cubes = yield* CubeService;
+    yield* cubes.pruneStopped.pipe(
+      Effect.catchTag("CubeUnavailableError", () => Effect.succeed([])),
+      Effect.catchCause((cause) => Effect.logWarning("Cube pruning failed", { cause })),
       Effect.delay(Duration.hours(1)),
       Effect.forever,
       Effect.forkScoped,

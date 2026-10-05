@@ -38,7 +38,7 @@ export interface PairingConnectionInput {
   readonly pairingUrl?: string;
   readonly host?: string;
   readonly pairingCode?: string;
-  /** See `ConnectWhen`; sandboxes connect only when needed. */
+  /** See `ConnectWhen`; cubes connect only when needed. */
   readonly connectWhen?: ConnectWhen;
 }
 

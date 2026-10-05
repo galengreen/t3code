@@ -1,33 +1,33 @@
 /**
- * Runs sandboxes as Fly Machines, through the Machines API with the user's own
+ * Runs cubes as Fly Machines, through the Machines API with the user's own
  * Fly token, organization, and region from settings.
  *
- * Each sandbox is its own Fly app, `t3-sbx-<id>`, holding one machine, so it
+ * Each cube is its own Fly app, `t3-cube-<id>`, holding one machine, so it
  * gets its own `https://<app>.fly.dev` address and deleting the app removes
  * everything it owns. Fly's proxy wakes a sleeping machine when a request
  * arrives, so the address is always given and connecting is how clients wake
- * a sandbox; the machine decides for itself when to sleep. The machine keeps its root filesystem across stops, so
+ * a cube; the machine decides for itself when to sleep. The machine keeps its root filesystem across stops, so
  * the image's home directory and everything written to it persist like a
- * Docker sandbox's volume. Sensitive variables become Fly app secrets, which
+ * Docker cube's volume. Sensitive variables become Fly app secrets, which
  * Fly encrypts and injects as environment variables; plain ones go into the
  * machine config. The app list is the record: apps are found by name prefix.
  *
  * Fly runs `exec` as root, so commands are run as the image's `dev` user.
  *
- * A spare carries `t3code_sandbox_spare` metadata, which claiming deletes; Fly
+ * A spare carries `t3code_cube_spare` metadata, which claiming deletes; Fly
  * changes metadata without restarting the machine. Parking suspends it, which
  * keeps memory and so the booted server, and resumes in about a second. Fly
  * only suspends machines of up to 2 GB, so larger ones are stopped instead.
  */
 import {
   EnvironmentId,
-  SandboxNotFoundError,
-  SandboxOperationError,
-  SandboxUnavailableError,
-  type SandboxFlyAccount,
-  type SandboxId,
-  type SandboxSize,
-  type SandboxState,
+  CubeNotFoundError,
+  CubeOperationError,
+  CubeUnavailableError,
+  type CubeFlyAccount,
+  type CubeId,
+  type CubeSize,
+  type CubeState,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
@@ -35,20 +35,20 @@ import * as Schema from "effect/Schema";
 import { HttpClient, HttpClientRequest } from "effect/unstable/http";
 
 import * as ServerSettings from "../serverSettings.ts";
-import type { SandboxDriver, SandboxMachine, SandboxOperation } from "./SandboxDriver.ts";
+import type { CubeDriver, CubeMachine, CubeOperation } from "./CubeDriver.ts";
 
 const API_BASE = "https://api.machines.dev";
-const APP_PREFIX = "t3-sbx-";
-const SPARE_METADATA = "t3code_sandbox_spare";
-const SANDBOX_PORT = 7777;
+const APP_PREFIX = "t3-cube-";
+const SPARE_METADATA = "t3code_cube_spare";
+const CUBE_PORT = 7777;
 /** The first start in a region pulls the image, which can take minutes. */
 const START_TIMEOUT_SECONDS = 300;
 const WAIT_SECONDS = 60;
 
-const appName = (id: SandboxId) => `${APP_PREFIX}${id}`;
+const appName = (id: CubeId) => `${APP_PREFIX}${id}`;
 
 const GUESTS: Record<
-  SandboxSize,
+  CubeSize,
   { readonly cpu_kind: "shared" | "performance"; readonly cpus: number; readonly memory_mb: number }
 > = {
   small: { cpu_kind: "shared", cpus: 2, memory_mb: 2048 },
@@ -126,18 +126,18 @@ const decodeRegions = Schema.decodeUnknownEffect(
   }),
 );
 
-const sandboxState = (state: string): SandboxState =>
+const cubeState = (state: string): CubeState =>
   state === "started" ? "running" : state === "failed" ? "failed" : "stopped";
 
-const toMachine = (app: string, machine: MachineSummary): SandboxMachine | null => {
+const toMachine = (app: string, machine: MachineSummary): CubeMachine | null => {
   if (!app.startsWith(APP_PREFIX)) return null;
   const id = app.slice(APP_PREFIX.length);
-  const state = sandboxState(machine.state);
+  const state = cubeState(machine.state);
   return {
     id,
-    label: machine.config?.metadata?.t3code_sandbox_label ?? id,
-    environmentId: machine.config?.metadata?.t3code_sandbox_environment
-      ? EnvironmentId.make(machine.config.metadata.t3code_sandbox_environment)
+    label: machine.config?.metadata?.t3code_cube_label ?? id,
+    environmentId: machine.config?.metadata?.t3code_cube_environment
+      ? EnvironmentId.make(machine.config.metadata.t3code_cube_environment)
       : null,
     image: machine.config?.image ?? "",
     state,
@@ -157,17 +157,17 @@ interface FlyResponse {
 
 const parseJson = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Unknown));
 
-/** One Machines API call; transport failures become `SandboxOperationError`. */
+/** One Machines API call; transport failures become `CubeOperationError`. */
 const makeCall =
   (client: HttpClient.HttpClient) =>
   (
     token: string,
     method: "GET" | "POST" | "DELETE",
     path: string,
-    operation: SandboxOperation,
-    id?: SandboxId,
+    operation: CubeOperation,
+    id?: CubeId,
     body?: unknown,
-  ): Effect.Effect<FlyResponse, SandboxOperationError | SandboxUnavailableError> => {
+  ): Effect.Effect<FlyResponse, CubeOperationError | CubeUnavailableError> => {
     const base =
       method === "GET"
         ? HttpClientRequest.get(`${API_BASE}${path}`)
@@ -192,11 +192,11 @@ const makeCall =
         ),
         // Waits for state are held server-side for up to a minute.
         Effect.timeout(`${WAIT_SECONDS + 30} seconds`),
-        Effect.mapError((cause) => new SandboxOperationError({ operation, id, cause })),
+        Effect.mapError((cause) => new CubeOperationError({ operation, id, cause })),
         Effect.flatMap((response) =>
           response.status === 401
             ? Effect.fail(
-                new SandboxUnavailableError({
+                new CubeUnavailableError({
                   reason: "Fly rejected the API token. Check it in Settings.",
                 }),
               )
@@ -207,13 +207,13 @@ const makeCall =
 
 const expectOk = (
   response: FlyResponse,
-  operation: SandboxOperation,
-  id?: SandboxId,
-): Effect.Effect<unknown, SandboxOperationError> =>
+  operation: CubeOperation,
+  id?: CubeId,
+): Effect.Effect<unknown, CubeOperationError> =>
   response.status >= 200 && response.status < 300
     ? Effect.succeed(response.body)
     : Effect.fail(
-        new SandboxOperationError({
+        new CubeOperationError({
           operation,
           id,
           cause: `Fly answered ${response.status}: ${
@@ -225,7 +225,7 @@ const expectOk = (
       );
 
 /** What a token can reach: its organizations and Fly's regions. */
-export const flyAccount = Effect.fn("FlySandboxDriver.account")(function* (token: string) {
+export const flyAccount = Effect.fn("FlyCubeDriver.account")(function* (token: string) {
   const call = makeCall(yield* HttpClient.HttpClient);
   const [tokenResponse, regionsResponse] = yield* Effect.all(
     [
@@ -234,7 +234,7 @@ export const flyAccount = Effect.fn("FlySandboxDriver.account")(function* (token
     ],
     { concurrency: 2 },
   );
-  const toError = (cause: unknown) => new SandboxOperationError({ operation: "account", cause });
+  const toError = (cause: unknown) => new CubeOperationError({ operation: "account", cause });
   const info = yield* expectOk(tokenResponse, "account").pipe(
     Effect.flatMap((body) => decodeTokenInfo(body).pipe(Effect.mapError(toError))),
   );
@@ -252,7 +252,7 @@ export const flyAccount = Effect.fn("FlySandboxDriver.account")(function* (token
       .map(({ code, name }) => ({ code, name }))
       .toSorted((a, b) => a.name.localeCompare(b.name)),
     nearestRegion: regions.nearest ?? null,
-  } satisfies SandboxFlyAccount;
+  } satisfies CubeFlyAccount;
 });
 
 export const make = Effect.gen(function* () {
@@ -261,17 +261,15 @@ export const make = Effect.gen(function* () {
 
   /** Token, organization, and region; null when Fly is not set up. */
   const configured = settings.getSettings.pipe(
-    Effect.map(({ sandboxFly }) =>
-      sandboxFly.apiToken && sandboxFly.organization ? sandboxFly : null,
-    ),
-    Effect.mapError(() => new SandboxUnavailableError({ reason: "Settings could not be read." })),
+    Effect.map(({ cubeFly }) => (cubeFly.apiToken && cubeFly.organization ? cubeFly : null)),
+    Effect.mapError(() => new CubeUnavailableError({ reason: "Settings could not be read." })),
   );
   const requireConfigured = configured.pipe(
     Effect.flatMap((fly) =>
       fly
         ? Effect.succeed(fly)
         : Effect.fail(
-            new SandboxUnavailableError({
+            new CubeUnavailableError({
               reason: "Add a Fly API token and organization in Settings.",
             }),
           ),
@@ -280,34 +278,34 @@ export const make = Effect.gen(function* () {
 
   const decodeOr =
     <A>(decode: (input: unknown) => Effect.Effect<A, Schema.SchemaError>) =>
-    (operation: SandboxOperation, id?: SandboxId) =>
+    (operation: CubeOperation, id?: CubeId) =>
     (body: unknown) =>
       decode(body).pipe(
-        Effect.mapError((cause) => new SandboxOperationError({ operation, id, cause })),
+        Effect.mapError((cause) => new CubeOperationError({ operation, id, cause })),
       );
 
-  /** The sandbox's one machine; not found once its app is gone. */
-  const machineOf = (token: string, id: SandboxId, operation: SandboxOperation) =>
+  /** The cube's one machine; not found once its app is gone. */
+  const machineOf = (token: string, id: CubeId, operation: CubeOperation) =>
     call(token, "GET", `/v1/apps/${appName(id)}/machines`, operation, id).pipe(
       Effect.flatMap((response) =>
         response.status === 404
-          ? Effect.fail(new SandboxNotFoundError({ id }))
+          ? Effect.fail(new CubeNotFoundError({ id }))
           : expectOk(response, operation, id).pipe(
               Effect.flatMap(decodeOr(decodeAppMachines)(operation, id)),
               Effect.flatMap(([machine]) =>
-                machine ? Effect.succeed(machine) : Effect.fail(new SandboxNotFoundError({ id })),
+                machine ? Effect.succeed(machine) : Effect.fail(new CubeNotFoundError({ id })),
               ),
             ),
       ),
     );
 
   /** Fly holds each wait for at most a minute and answers 408 when it runs out. */
-  const waitFor = Effect.fn("FlySandboxDriver.waitFor")(function* (
+  const waitFor = Effect.fn("FlyCubeDriver.waitFor")(function* (
     token: string,
-    id: SandboxId,
+    id: CubeId,
     machineId: string,
     state: "started" | "stopped" | "suspended",
-    operation: SandboxOperation,
+    operation: CubeOperation,
   ) {
     for (let waited = 0; waited < START_TIMEOUT_SECONDS; waited += WAIT_SECONDS) {
       const response = yield* call(
@@ -319,17 +317,17 @@ export const make = Effect.gen(function* () {
       );
       if (response.status !== 408) return yield* expectOk(response, operation, id);
     }
-    return yield* new SandboxOperationError({
+    return yield* new CubeOperationError({
       operation,
       id,
       cause: `The machine was not ${state} after ${START_TIMEOUT_SECONDS} seconds.`,
     });
   });
 
-  const list: SandboxDriver["list"] = Effect.gen(function* () {
+  const list: CubeDriver["list"] = Effect.gen(function* () {
     const fly = yield* configured;
     if (!fly) return [];
-    const machines: SandboxMachine[] = [];
+    const machines: CubeMachine[] = [];
     let cursor: string | null | undefined;
     do {
       const query = `include_deleted=false${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`;
@@ -343,31 +341,29 @@ export const make = Effect.gen(function* () {
         Effect.flatMap(decodeOr(decodeOrgMachines)("list")),
       );
       for (const machine of page.machines ?? []) {
-        const sandbox = machine.app_name ? toMachine(machine.app_name, machine) : null;
-        if (sandbox && machine.state !== "destroyed") machines.push(sandbox);
+        const cube = machine.app_name ? toMachine(machine.app_name, machine) : null;
+        if (cube && machine.state !== "destroyed") machines.push(cube);
       }
       cursor = page.next_cursor;
     } while (cursor);
     return machines;
   });
 
-  const find: SandboxDriver["find"] = (id, operation) =>
+  const find: CubeDriver["find"] = (id, operation) =>
     configured.pipe(
       Effect.flatMap((fly) =>
         fly
           ? machineOf(fly.apiToken, id, operation).pipe(
               Effect.flatMap((machine) => {
-                const sandbox = toMachine(appName(id), machine);
-                return sandbox
-                  ? Effect.succeed(sandbox)
-                  : Effect.fail(new SandboxNotFoundError({ id }));
+                const cube = toMachine(appName(id), machine);
+                return cube ? Effect.succeed(cube) : Effect.fail(new CubeNotFoundError({ id }));
               }),
             )
-          : Effect.fail(new SandboxNotFoundError({ id })),
+          : Effect.fail(new CubeNotFoundError({ id })),
       ),
     );
 
-  const create: SandboxDriver["create"] = Effect.fn("FlySandboxDriver.create")(function* (spec) {
+  const create: CubeDriver["create"] = Effect.fn("FlyCubeDriver.create")(function* (spec) {
     const fly = yield* requireConfigured;
     const app = appName(spec.id);
     const post = (path: string, body: unknown) =>
@@ -389,7 +385,7 @@ export const make = Effect.gen(function* () {
               Effect.flatMap(decodeOr(decodeSecretsVersion)("create", spec.id)),
             )).version;
       const machine = yield* post(`/v1/apps/${app}/machines`, {
-        name: "sandbox",
+        name: "cube",
         ...(fly.region ? { region: fly.region } : {}),
         ...(secretsVersion === undefined ? {} : { min_secrets_version: secretsVersion }),
         config: {
@@ -399,21 +395,21 @@ export const make = Effect.gen(function* () {
           ),
           guest: GUESTS[spec.size],
           rootfs: { persist: "always" },
-          // The sandbox's server exits when it has been idle, which must stop
+          // The cube's server exits when it has been idle, which must stop
           // the machine rather than restart it.
           restart: { policy: "no" },
           metadata: {
-            t3code_sandbox: "1",
-            t3code_sandbox_label: spec.label,
-            t3code_sandbox_environment: spec.environmentId,
+            t3code_cube: "1",
+            t3code_cube_label: spec.label,
+            t3code_cube_environment: spec.environmentId,
             ...(spec.spare === null ? {} : { [SPARE_METADATA]: spec.spare }),
           },
           services: [
             {
               protocol: "tcp",
-              internal_port: SANDBOX_PORT,
-              // A request wakes a sleeping sandbox; clients connect only when
-              // they need it, and the sandbox sleeps itself when idle.
+              internal_port: CUBE_PORT,
+              // A request wakes a sleeping cube; clients connect only when
+              // they need it, and the cube sleeps itself when idle.
               autostart: true,
               autostop: "off",
               ports: [
@@ -428,7 +424,7 @@ export const make = Effect.gen(function* () {
           (error) => String(error.cause).includes("failed to get manifest"),
           () =>
             Effect.fail(
-              new SandboxUnavailableError({
+              new CubeUnavailableError({
                 reason: `Fly could not find the image ${spec.image}. Fly pulls images from a registry, so set the cube image to a registry reference such as registry.fly.io/<app>:latest.`,
               }),
             ),
@@ -445,7 +441,7 @@ export const make = Effect.gen(function* () {
     );
   });
 
-  const start: SandboxDriver["start"] = Effect.fn("FlySandboxDriver.start")(function* (id) {
+  const start: CubeDriver["start"] = Effect.fn("FlyCubeDriver.start")(function* (id) {
     const fly = yield* requireConfigured;
     const machine = yield* machineOf(fly.apiToken, id, "start");
     yield* call(
@@ -458,7 +454,7 @@ export const make = Effect.gen(function* () {
     yield* waitFor(fly.apiToken, id, machine.id, "started", "start");
   });
 
-  const stop: SandboxDriver["stop"] = Effect.fn("FlySandboxDriver.stop")(function* (id) {
+  const stop: CubeDriver["stop"] = Effect.fn("FlyCubeDriver.stop")(function* (id) {
     const fly = yield* requireConfigured;
     const machine = yield* machineOf(fly.apiToken, id, "stop");
     yield* call(
@@ -474,7 +470,7 @@ export const make = Effect.gen(function* () {
     yield* waitFor(fly.apiToken, id, machine.id, "stopped", "stop");
   });
 
-  const park: SandboxDriver["park"] = Effect.fn("FlySandboxDriver.park")(function* (id) {
+  const park: CubeDriver["park"] = Effect.fn("FlyCubeDriver.park")(function* (id) {
     const fly = yield* requireConfigured;
     const machine = yield* machineOf(fly.apiToken, id, "park");
     const path = `/v1/apps/${appName(id)}/machines/${machine.id}`;
@@ -483,7 +479,7 @@ export const make = Effect.gen(function* () {
       yield* waitFor(fly.apiToken, id, machine.id, "suspended", "park");
       return;
     }
-    yield* Effect.logInfo("Fly could not suspend a spare sandbox; stopping it instead", {
+    yield* Effect.logInfo("Fly could not suspend a spare cube; stopping it instead", {
       id,
       status: suspended.status,
     });
@@ -493,7 +489,7 @@ export const make = Effect.gen(function* () {
     yield* waitFor(fly.apiToken, id, machine.id, "stopped", "park");
   });
 
-  const claim: SandboxDriver["claim"] = Effect.fn("FlySandboxDriver.claim")(function* (id) {
+  const claim: CubeDriver["claim"] = Effect.fn("FlyCubeDriver.claim")(function* (id) {
     const fly = yield* requireConfigured;
     const machine = yield* machineOf(fly.apiToken, id, "claim");
     yield* call(
@@ -505,39 +501,39 @@ export const make = Effect.gen(function* () {
     ).pipe(Effect.flatMap((response) => expectOk(response, "claim", id)));
   });
 
-  const remove: SandboxDriver["remove"] = Effect.fn("FlySandboxDriver.remove")(function* (id) {
+  const remove: CubeDriver["remove"] = Effect.fn("FlyCubeDriver.remove")(function* (id) {
     const fly = yield* requireConfigured;
     const response = yield* call(fly.apiToken, "DELETE", `/v1/apps/${appName(id)}`, "remove", id);
     if (response.status !== 404) yield* expectOk(response, "remove", id);
   });
 
-  const removeIfStopped: SandboxDriver["removeIfStopped"] = Effect.fn(
-    "FlySandboxDriver.removeIfStopped",
-  )(function* (id) {
-    const fly = yield* requireConfigured;
-    const machine = yield* machineOf(fly.apiToken, id, "remove");
-    // Without `force`, Fly refuses to destroy a started machine, so a wake
-    // that lands after this sandbox was found idle keeps it.
-    const destroyed = yield* call(
-      fly.apiToken,
-      "DELETE",
-      `/v1/apps/${appName(id)}/machines/${machine.id}`,
-      "remove",
-      id,
-    );
-    if (destroyed.status < 200 || destroyed.status >= 300) {
-      yield* Effect.logInfo("Fly kept a sandbox that is no longer idle", {
+  const removeIfStopped: CubeDriver["removeIfStopped"] = Effect.fn("FlyCubeDriver.removeIfStopped")(
+    function* (id) {
+      const fly = yield* requireConfigured;
+      const machine = yield* machineOf(fly.apiToken, id, "remove");
+      // Without `force`, Fly refuses to destroy a started machine, so a wake
+      // that lands after this cube was found idle keeps it.
+      const destroyed = yield* call(
+        fly.apiToken,
+        "DELETE",
+        `/v1/apps/${appName(id)}/machines/${machine.id}`,
+        "remove",
         id,
-        status: destroyed.status,
-      });
-      return false;
-    }
-    // Only now that the machine is gone does the app go, with its IPs.
-    yield* remove(id);
-    return true;
-  });
+      );
+      if (destroyed.status < 200 || destroyed.status >= 300) {
+        yield* Effect.logInfo("Fly kept a cube that is no longer idle", {
+          id,
+          status: destroyed.status,
+        });
+        return false;
+      }
+      // Only now that the machine is gone does the app go, with its IPs.
+      yield* remove(id);
+      return true;
+    },
+  );
 
-  const exec: SandboxDriver["exec"] = Effect.fn("FlySandboxDriver.exec")(
+  const exec: CubeDriver["exec"] = Effect.fn("FlyCubeDriver.exec")(
     function* (id, command, operation) {
       const fly = yield* requireConfigured;
       const machine = yield* machineOf(fly.apiToken, id, operation);
@@ -557,7 +553,7 @@ export const make = Effect.gen(function* () {
         Effect.flatMap(decodeOr(decodeExec)(operation, id)),
       );
       if ((result.exit_code ?? 0) !== 0) {
-        return yield* new SandboxOperationError({ operation, id, cause: result.stderr ?? "" });
+        return yield* new CubeOperationError({ operation, id, cause: result.stderr ?? "" });
       }
       return result.stdout ?? "";
     },
@@ -574,5 +570,5 @@ export const make = Effect.gen(function* () {
     remove,
     removeIfStopped,
     exec,
-  } satisfies SandboxDriver;
+  } satisfies CubeDriver;
 });

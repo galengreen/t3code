@@ -147,7 +147,7 @@ export class EnvironmentRegistry extends Context.Service<
     /**
      * Closes an environment's connection until something needs it again.
      * Nothing is saved; for environments that connect when needed, such as a
-     * sandbox the user just put to sleep.
+     * cube the user just put to sleep.
      */
     readonly disconnect: (environmentId: EnvironmentId) => Effect.Effect<void>;
     /**

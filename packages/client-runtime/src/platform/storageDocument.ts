@@ -32,7 +32,7 @@ export const ConnectionCatalogDocument = Schema.Struct({
     Schema.withDecodingDefaultKey(Effect.succeed([])),
   ),
   // Saved environments that connect only when needed, because they sleep
-  // when unused (sandboxes). See `ConnectionCatalogEntry.connectWhen`.
+  // when unused (cubes). See `ConnectionCatalogEntry.connectWhen`.
   onDemandEnvironmentIds: Schema.optionalKey(Schema.Array(EnvironmentId)),
 });
 export type ConnectionCatalogDocument = typeof ConnectionCatalogDocument.Type;

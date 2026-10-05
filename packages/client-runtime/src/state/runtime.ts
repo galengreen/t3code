@@ -44,7 +44,7 @@ interface EnvironmentCommandAtomOptions<Input, A, E, R> extends Omit<
   ) => Effect.Effect<A, E, R>;
   /**
    * False for commands the app sends on its own rather than at the user's
-   * request (marking a thread seen), which must not wake a sleeping sandbox.
+   * request (marking a thread seen), which must not wake a sleeping cube.
    */
   readonly wakesEnvironment?: boolean;
 }
@@ -469,7 +469,7 @@ const WAKE_TIMEOUT = "60 seconds";
 
 /**
  * Connects an environment that connects only when needed (a sleeping
- * sandbox) before a user command runs in it. Other environments are left to
+ * cube) before a user command runs in it. Other environments are left to
  * their own connection, so a command still fails fast while they are offline.
  */
 function connectIfNeeded(

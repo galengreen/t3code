@@ -9,44 +9,44 @@ import { useCallback } from "react";
 
 import { stackedThreadToast, toastManager } from "../components/ui/toast";
 import { readLocalApi } from "../localApi";
-import { changeSandbox, readSandboxForEnvironment } from "../state/sandbox";
+import { changeCube, readCubeForEnvironment } from "../state/cube";
 import { useAtomCommand } from "../state/use-atom-command";
 
-export type SandboxMenuAction = "sandbox:start" | "sandbox:stop" | "sandbox:delete";
+export type CubeMenuAction = "cube:start" | "cube:stop" | "cube:delete";
 
-const FAILURE_TITLES: Record<SandboxMenuAction, string> = {
-  "sandbox:start": "Could not start cube",
-  "sandbox:stop": "Could not put cube to sleep",
-  "sandbox:delete": "Could not delete cube",
+const FAILURE_TITLES: Record<CubeMenuAction, string> = {
+  "cube:start": "Could not start cube",
+  "cube:stop": "Could not put cube to sleep",
+  "cube:delete": "Could not delete cube",
 };
 
-/** Whether a thread menu should offer sandbox actions, read when the menu opens. */
-export function readThreadSandboxMenuState(environmentId: EnvironmentId) {
-  const hosted = readSandboxForEnvironment(environmentId);
+/** Whether a thread menu should offer cube actions, read when the menu opens. */
+export function readThreadCubeMenuState(environmentId: EnvironmentId) {
+  const hosted = readCubeForEnvironment(environmentId);
   return hosted
-    ? { state: hosted.sandbox.state, wakesOnRequest: hosted.sandbox.backend === "fly" }
+    ? { state: hosted.cube.state, wakesOnRequest: hosted.cube.backend === "fly" }
     : null;
 }
 
 /**
- * Runs a thread menu's sandbox action against the sandbox serving the
- * thread's environment. Deleting asks first, since the sandbox holds its
+ * Runs a thread menu's cube action against the cube serving the
+ * thread's environment. Deleting asks first, since the cube holds its
  * threads' conversations and files, and leaves any of its threads on screen.
  */
-export function useSandboxActions() {
-  const change = useAtomCommand(changeSandbox, { reportFailure: false });
+export function useCubeActions() {
+  const change = useAtomCommand(changeCube, { reportFailure: false });
   const router = useRouter();
   return useCallback(
-    async (environmentId: EnvironmentId, action: SandboxMenuAction) => {
-      const hosted = readSandboxForEnvironment(environmentId);
+    async (environmentId: EnvironmentId, action: CubeMenuAction) => {
+      const hosted = readCubeForEnvironment(environmentId);
       if (!hosted) return;
-      if (action === "sandbox:delete") {
+      if (action === "cube:delete") {
         const api = readLocalApi();
         if (!api) return;
         const confirmed = await settlePromise(() =>
           api.dialogs.confirm(
             [
-              `Delete cube "${hosted.sandbox.label}"?`,
+              `Delete cube "${hosted.cube.label}"?`,
               "Its threads and files go with it, including changes that were not pushed.",
             ].join("\n"),
             { variant: "destructive" },
@@ -56,13 +56,12 @@ export function useSandboxActions() {
       }
       const result = await change({
         hostEnvironmentId: hosted.hostEnvironmentId,
-        sandbox: hosted.sandbox,
-        change:
-          action === "sandbox:start" ? "start" : action === "sandbox:stop" ? "stop" : "remove",
+        cube: hosted.cube,
+        change: action === "cube:start" ? "start" : action === "cube:stop" ? "stop" : "remove",
       });
       if (
         result._tag === "Success" &&
-        action === "sandbox:delete" &&
+        action === "cube:delete" &&
         router.state.location.pathname.startsWith(`/${environmentId}/`)
       ) {
         void router.navigate({ to: "/" });

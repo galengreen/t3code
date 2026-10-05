@@ -260,14 +260,14 @@ import {
   DeviceShutdownInput,
 } from "./device.ts";
 import {
-  SandboxCreateInput,
-  SandboxError,
-  SandboxFlyAccount,
-  SandboxFlyAccountInput,
-  SandboxIdInput,
-  SandboxPairing,
-  SandboxSummary,
-} from "./sandbox.ts";
+  CubeCreateInput,
+  CubeError,
+  CubeFlyAccount,
+  CubeFlyAccountInput,
+  CubeIdInput,
+  CubePairing,
+  CubeSummary,
+} from "./cube.ts";
 import {
   PreviewAutomationError,
   PreviewAutomationHost,
@@ -439,16 +439,16 @@ export const WS_METHODS = {
   deviceDetail: "device.detail",
   deviceAction: "device.action",
 
-  // Sandbox methods
-  sandboxList: "sandbox.list",
-  sandboxCreate: "sandbox.create",
-  sandboxStart: "sandbox.start",
-  sandboxStop: "sandbox.stop",
-  sandboxRemove: "sandbox.remove",
-  sandboxPair: "sandbox.pair",
-  sandboxFlyAccount: "sandbox.flyAccount",
-  sandboxRemovedEnvironments: "sandbox.removedEnvironments",
-  sandboxSleep: "sandbox.sleep",
+  // Cube methods
+  cubeList: "cube.list",
+  cubeCreate: "cube.create",
+  cubeStart: "cube.start",
+  cubeStop: "cube.stop",
+  cubeRemove: "cube.remove",
+  cubePair: "cube.pair",
+  cubeFlyAccount: "cube.flyAccount",
+  cubeRemovedEnvironments: "cube.removedEnvironments",
+  cubeSleep: "cube.sleep",
 
   // Server meta
   serverProbe: "server.probe",
@@ -1462,58 +1462,58 @@ const WsSubscribeDiscoveredLocalServersRpc = Rpc.make(WS_METHODS.subscribeDiscov
   stream: true,
 });
 
-const WsSandboxListRpc = Rpc.make(WS_METHODS.sandboxList, {
+const WsCubeListRpc = Rpc.make(WS_METHODS.cubeList, {
   payload: Schema.Struct({}),
-  success: Schema.Array(SandboxSummary),
-  error: Schema.Union([SandboxError, EnvironmentAuthorizationError]),
+  success: Schema.Array(CubeSummary),
+  error: Schema.Union([CubeError, EnvironmentAuthorizationError]),
 });
 
-const WsSandboxCreateRpc = Rpc.make(WS_METHODS.sandboxCreate, {
-  payload: SandboxCreateInput,
-  success: SandboxSummary,
-  error: Schema.Union([SandboxError, EnvironmentAuthorizationError]),
+const WsCubeCreateRpc = Rpc.make(WS_METHODS.cubeCreate, {
+  payload: CubeCreateInput,
+  success: CubeSummary,
+  error: Schema.Union([CubeError, EnvironmentAuthorizationError]),
 });
 
-const WsSandboxStartRpc = Rpc.make(WS_METHODS.sandboxStart, {
-  payload: SandboxIdInput,
-  success: SandboxSummary,
-  error: Schema.Union([SandboxError, EnvironmentAuthorizationError]),
+const WsCubeStartRpc = Rpc.make(WS_METHODS.cubeStart, {
+  payload: CubeIdInput,
+  success: CubeSummary,
+  error: Schema.Union([CubeError, EnvironmentAuthorizationError]),
 });
 
-const WsSandboxStopRpc = Rpc.make(WS_METHODS.sandboxStop, {
-  payload: SandboxIdInput,
-  success: SandboxSummary,
-  error: Schema.Union([SandboxError, EnvironmentAuthorizationError]),
+const WsCubeStopRpc = Rpc.make(WS_METHODS.cubeStop, {
+  payload: CubeIdInput,
+  success: CubeSummary,
+  error: Schema.Union([CubeError, EnvironmentAuthorizationError]),
 });
 
-const WsSandboxRemoveRpc = Rpc.make(WS_METHODS.sandboxRemove, {
-  payload: SandboxIdInput,
-  error: Schema.Union([SandboxError, EnvironmentAuthorizationError]),
+const WsCubeRemoveRpc = Rpc.make(WS_METHODS.cubeRemove, {
+  payload: CubeIdInput,
+  error: Schema.Union([CubeError, EnvironmentAuthorizationError]),
 });
 
-const WsSandboxPairRpc = Rpc.make(WS_METHODS.sandboxPair, {
-  payload: SandboxIdInput,
-  success: SandboxPairing,
-  error: Schema.Union([SandboxError, EnvironmentAuthorizationError]),
+const WsCubePairRpc = Rpc.make(WS_METHODS.cubePair, {
+  payload: CubeIdInput,
+  success: CubePairing,
+  error: Schema.Union([CubeError, EnvironmentAuthorizationError]),
 });
 
-// Served by a sandbox's own server: puts its machine to sleep now, unless its
+// Served by a cube's own server: puts its machine to sleep now, unless its
 // agent is working or its repository is still being prepared. Answers first.
-const WsSandboxSleepRpc = Rpc.make(WS_METHODS.sandboxSleep, {
+const WsCubeSleepRpc = Rpc.make(WS_METHODS.cubeSleep, {
   payload: Schema.Struct({}),
-  error: Schema.Union([SandboxError, EnvironmentAuthorizationError]),
+  error: Schema.Union([CubeError, EnvironmentAuthorizationError]),
 });
 
-const WsSandboxRemovedEnvironmentsRpc = Rpc.make(WS_METHODS.sandboxRemovedEnvironments, {
+const WsCubeRemovedEnvironmentsRpc = Rpc.make(WS_METHODS.cubeRemovedEnvironments, {
   payload: Schema.Struct({}),
   success: Schema.Array(EnvironmentId),
-  error: Schema.Union([SandboxError, EnvironmentAuthorizationError]),
+  error: Schema.Union([CubeError, EnvironmentAuthorizationError]),
 });
 
-const WsSandboxFlyAccountRpc = Rpc.make(WS_METHODS.sandboxFlyAccount, {
-  payload: SandboxFlyAccountInput,
-  success: SandboxFlyAccount,
-  error: Schema.Union([SandboxError, EnvironmentAuthorizationError]),
+const WsCubeFlyAccountRpc = Rpc.make(WS_METHODS.cubeFlyAccount, {
+  payload: CubeFlyAccountInput,
+  success: CubeFlyAccount,
+  error: Schema.Union([CubeError, EnvironmentAuthorizationError]),
 });
 
 const WsDeviceTestHostRpc = Rpc.make(WS_METHODS.deviceTestHost, {
@@ -1931,15 +1931,15 @@ export const WsRpcGroup = RpcGroup.make(
   WsDeviceDetailRpc,
   WsDeviceActionRpc,
   WsSubscribeDeviceStateRpc,
-  WsSandboxListRpc,
-  WsSandboxCreateRpc,
-  WsSandboxStartRpc,
-  WsSandboxStopRpc,
-  WsSandboxRemoveRpc,
-  WsSandboxFlyAccountRpc,
-  WsSandboxRemovedEnvironmentsRpc,
-  WsSandboxSleepRpc,
-  WsSandboxPairRpc,
+  WsCubeListRpc,
+  WsCubeCreateRpc,
+  WsCubeStartRpc,
+  WsCubeStopRpc,
+  WsCubeRemoveRpc,
+  WsCubeFlyAccountRpc,
+  WsCubeRemovedEnvironmentsRpc,
+  WsCubeSleepRpc,
+  WsCubePairRpc,
   WsSubscribeServerConfigRpc,
   WsSubscribeServerLifecycleRpc,
   WsSubscribeAuthAccessRpc,

@@ -18,7 +18,7 @@ export interface EnvironmentConnectionPresentation {
   readonly error: string | null;
   readonly traceId: string | null;
   /**
-   * The environment connects only when needed (a sandbox), so "available"
+   * The environment connects only when needed (a cube), so "available"
    * means idle, possibly asleep, and using it connects.
    */
   readonly connectsWhenNeeded?: true;

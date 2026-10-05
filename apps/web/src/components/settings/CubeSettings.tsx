@@ -1,14 +1,9 @@
-import type {
-  EnvironmentId,
-  SandboxBackend,
-  SandboxSize,
-  ServerSettingsPatch,
-} from "@t3tools/contracts";
+import type { EnvironmentId, CubeBackend, CubeSize, ServerSettingsPatch } from "@t3tools/contracts";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import { useState } from "react";
 
 import { useEnvironmentSettings } from "../../hooks/useSettings";
-import { sandboxEnvironment } from "../../state/sandbox";
+import { cubeEnvironment } from "../../state/cube";
 import { serverEnvironment } from "../../state/server";
 import { useEnvironmentQuery } from "../../state/query";
 import { useAtomCommand } from "../../state/use-atom-command";
@@ -28,7 +23,7 @@ import { searchableSetting } from "./settingsSearch";
 import { useSettingsScope } from "./SettingsScopeContext";
 
 /**
- * Sandbox hosting for one environment. Sandboxes run on the machine that
+ * Cube hosting for one environment. Cubes run on the machine that
  * creates them and their variables usually hold login tokens, so these
  * settings save to the selected environment only instead of fanning out.
  */
@@ -36,12 +31,12 @@ import { useSettingsScope } from "./SettingsScopeContext";
 export function CubesSettingsPanel() {
   return (
     <SettingsPageContainer>
-      <SandboxSettings />
+      <CubeSettings />
     </SettingsPageContainer>
   );
 }
 
-function SandboxSettings() {
+function CubeSettings() {
   const { scope, environment, connectedEnvironments } = useSettingsScope();
   if (scope.kind === "project" || scope.kind === "checkout") return null;
   const environmentId =
@@ -49,7 +44,7 @@ function SandboxSettings() {
   const aggregate = scope.environmentIds.length !== 1 && connectedEnvironments.length > 1;
   return (
     <SettingsSection
-      id={searchableSetting("sandboxes").id}
+      id={searchableSetting("cubes").id}
       title={aggregate && environment ? `Cubes · ${environment.label}` : "Cubes"}
     >
       {environmentId === null ? (
@@ -58,13 +53,13 @@ function SandboxSettings() {
         </p>
       ) : (
         // Drafts belong to one environment; switching must not carry them over.
-        <SandboxControls key={environmentId} environmentId={environmentId} />
+        <CubeControls key={environmentId} environmentId={environmentId} />
       )}
     </SettingsSection>
   );
 }
 
-const BACKEND_LABELS: Record<SandboxBackend, string> = {
+const BACKEND_LABELS: Record<CubeBackend, string> = {
   docker: "This machine (Docker)",
   fly: "Fly.io",
 };
@@ -90,37 +85,37 @@ const sleepLabel = (minutes: number) =>
 const deleteLabel = (days: number) =>
   DELETE_OPTIONS.find((option) => option.days === days)?.label ?? `After ${days} days`;
 
-const SIZE_LABELS: Record<SandboxSize, string> = {
+const SIZE_LABELS: Record<CubeSize, string> = {
   small: "Small · 2 vCPU, 2 GB",
   medium: "Medium · 4 vCPU, 8 GB",
   large: "Large · 4 dedicated vCPU, 8 GB",
 };
 
-function SandboxControls({ environmentId }: { readonly environmentId: EnvironmentId }) {
+function CubeControls({ environmentId }: { readonly environmentId: EnvironmentId }) {
   const settings = useEnvironmentSettings(environmentId);
   const updateSettings = useAtomCommand(serverEnvironment.updateSettings, {
-    label: "save sandbox settings",
+    label: "save cube settings",
   });
   const save = (patch: ServerSettingsPatch) => updateSettings({ environmentId, input: { patch } });
-  const fly = settings.sandboxBackend === "fly";
+  const fly = settings.cubeBackend === "fly";
 
   return (
     <>
       <SettingsRow
-        {...searchableSetting("sandboxes-enabled")}
+        {...searchableSetting("cubes-enabled")}
         description="Create cubes, each a separate environment for one task, with this machine's Docker or on Fly.io."
         control={
           <Switch
-            checked={settings.enableSandboxes}
-            onCheckedChange={(checked) => void save({ enableSandboxes: Boolean(checked) })}
+            checked={settings.enableCubes}
+            onCheckedChange={(checked) => void save({ enableCubes: Boolean(checked) })}
             aria-label="Host cubes"
           />
         }
       />
-      {settings.enableSandboxes ? (
+      {settings.enableCubes ? (
         <>
           <SettingsRow
-            {...searchableSetting("sandbox-backend")}
+            {...searchableSetting("cube-backend")}
             description={
               fly
                 ? "New cubes run as Fly Machines on your own Fly account. Existing cubes stay where they are."
@@ -128,16 +123,16 @@ function SandboxControls({ environmentId }: { readonly environmentId: Environmen
             }
             control={
               <Select
-                value={settings.sandboxBackend}
+                value={settings.cubeBackend}
                 onValueChange={(value) => {
-                  if (value === "docker" || value === "fly") void save({ sandboxBackend: value });
+                  if (value === "docker" || value === "fly") void save({ cubeBackend: value });
                 }}
               >
                 <SelectTrigger size="sm" className="w-full sm:w-56" aria-label="Cubes run on">
-                  <SelectValue>{BACKEND_LABELS[settings.sandboxBackend]}</SelectValue>
+                  <SelectValue>{BACKEND_LABELS[settings.cubeBackend]}</SelectValue>
                 </SelectTrigger>
                 <SelectPopup align="end" alignItemWithTrigger={false}>
-                  {(Object.keys(BACKEND_LABELS) as ReadonlyArray<SandboxBackend>).map((backend) => (
+                  {(Object.keys(BACKEND_LABELS) as ReadonlyArray<CubeBackend>).map((backend) => (
                     <SelectItem hideIndicator key={backend} value={backend}>
                       {BACKEND_LABELS[backend]}
                     </SelectItem>
@@ -148,22 +143,22 @@ function SandboxControls({ environmentId }: { readonly environmentId: Environmen
           />
           {fly ? <FlySettings environmentId={environmentId} save={save} /> : null}
           <SettingsRow
-            {...searchableSetting("sandbox-size")}
+            {...searchableSetting("cube-size")}
             description="How much machine each new cube gets. Builds and large test suites want medium or more."
             control={
               <Select
-                value={settings.sandboxSize}
+                value={settings.cubeSize}
                 onValueChange={(value) => {
                   if (value === "small" || value === "medium" || value === "large") {
-                    void save({ sandboxSize: value });
+                    void save({ cubeSize: value });
                   }
                 }}
               >
                 <SelectTrigger size="sm" className="w-full sm:w-56" aria-label="Cube size">
-                  <SelectValue>{SIZE_LABELS[settings.sandboxSize]}</SelectValue>
+                  <SelectValue>{SIZE_LABELS[settings.cubeSize]}</SelectValue>
                 </SelectTrigger>
                 <SelectPopup align="end" alignItemWithTrigger={false}>
-                  {(Object.keys(SIZE_LABELS) as ReadonlyArray<SandboxSize>).map((size) => (
+                  {(Object.keys(SIZE_LABELS) as ReadonlyArray<CubeSize>).map((size) => (
                     <SelectItem hideIndicator key={size} value={size}>
                       {SIZE_LABELS[size]}
                     </SelectItem>
@@ -173,18 +168,18 @@ function SandboxControls({ environmentId }: { readonly environmentId: Environmen
             }
           />
           <SettingsRow
-            {...searchableSetting("sandbox-sleep")}
+            {...searchableSetting("cube-sleep")}
             description="Put a cube to sleep once its agent has finished and no message has been sent for this long, so it stops costing money. Opening its thread wakes it. Applies to cubes created afterwards."
             control={
               <Select
-                value={String(settings.sandboxSleepAfterMinutes)}
+                value={String(settings.cubeSleepAfterMinutes)}
                 onValueChange={(value) => {
                   const minutes = Number(value);
-                  if (Number.isInteger(minutes)) void save({ sandboxSleepAfterMinutes: minutes });
+                  if (Number.isInteger(minutes)) void save({ cubeSleepAfterMinutes: minutes });
                 }}
               >
                 <SelectTrigger size="sm" className="w-full sm:w-56" aria-label="Sleep when idle">
-                  <SelectValue>{sleepLabel(settings.sandboxSleepAfterMinutes)}</SelectValue>
+                  <SelectValue>{sleepLabel(settings.cubeSleepAfterMinutes)}</SelectValue>
                 </SelectTrigger>
                 <SelectPopup align="end" alignItemWithTrigger={false}>
                   {SLEEP_OPTIONS.map((option) => (
@@ -197,7 +192,7 @@ function SandboxControls({ environmentId }: { readonly environmentId: Environmen
             }
           />
           <SettingsRow
-            {...searchableSetting("sandbox-keep-ready")}
+            {...searchableSetting("cube-keep-ready")}
             description={
               fly
                 ? "Keep one cube booted and asleep, so a new one starts in seconds. A sleeping cube only costs its storage, a few cents a month."
@@ -205,21 +200,21 @@ function SandboxControls({ environmentId }: { readonly environmentId: Environmen
             }
             control={
               <Switch
-                checked={settings.sandboxKeepReady}
-                onCheckedChange={(checked) => void save({ sandboxKeepReady: Boolean(checked) })}
+                checked={settings.cubeKeepReady}
+                onCheckedChange={(checked) => void save({ cubeKeepReady: Boolean(checked) })}
                 aria-label="Keep a cube ready"
               />
             }
           />
           <SettingsRow
-            {...searchableSetting("sandbox-delete")}
+            {...searchableSetting("cube-delete")}
             description="Delete a cube that has stayed stopped this long. Its files go with it, including changes that were not pushed."
             control={
               <Select
-                value={String(settings.sandboxDeleteAfterDays)}
+                value={String(settings.cubeDeleteAfterDays)}
                 onValueChange={(value) => {
                   const days = Number(value);
-                  if (Number.isInteger(days)) void save({ sandboxDeleteAfterDays: days });
+                  if (Number.isInteger(days)) void save({ cubeDeleteAfterDays: days });
                 }}
               >
                 <SelectTrigger
@@ -227,7 +222,7 @@ function SandboxControls({ environmentId }: { readonly environmentId: Environmen
                   className="w-full sm:w-56"
                   aria-label="Delete stopped cubes"
                 >
-                  <SelectValue>{deleteLabel(settings.sandboxDeleteAfterDays)}</SelectValue>
+                  <SelectValue>{deleteLabel(settings.cubeDeleteAfterDays)}</SelectValue>
                 </SelectTrigger>
                 <SelectPopup align="end" alignItemWithTrigger={false}>
                   {DELETE_OPTIONS.map((option) => (
@@ -240,7 +235,7 @@ function SandboxControls({ environmentId }: { readonly environmentId: Environmen
             }
           />
           <SettingsRow
-            {...searchableSetting("sandbox-image")}
+            {...searchableSetting("cube-image")}
             description={
               fly
                 ? "Image each new cube runs. Fly pulls it, so use a registry reference."
@@ -251,10 +246,10 @@ function SandboxControls({ environmentId }: { readonly environmentId: Environmen
                 size="sm"
                 font="mono"
                 className="w-full sm:w-56"
-                value={settings.sandboxImage}
+                value={settings.cubeImage}
                 onCommit={(value) => {
                   const image = value.trim();
-                  if (image && image !== settings.sandboxImage) void save({ sandboxImage: image });
+                  if (image && image !== settings.cubeImage) void save({ cubeImage: image });
                 }}
                 spellCheck={false}
                 aria-label="Cube image"
@@ -263,18 +258,18 @@ function SandboxControls({ environmentId }: { readonly environmentId: Environmen
           />
           {fly ? null : (
             <SettingsRow
-              {...searchableSetting("sandbox-address")}
+              {...searchableSetting("cube-address")}
               description="Where cubes accept connections. Loopback serves this machine only; use its LAN or Tailscale address to reach cubes from other devices."
               control={
                 <DraftInput
                   size="sm"
                   font="mono"
                   className="w-full sm:w-56"
-                  value={settings.sandboxPublishHost}
+                  value={settings.cubePublishHost}
                   onCommit={(value) => {
                     const host = value.trim();
-                    if (host && host !== settings.sandboxPublishHost) {
-                      void save({ sandboxPublishHost: host });
+                    if (host && host !== settings.cubePublishHost) {
+                      void save({ cubePublishHost: host });
                     }
                   }}
                   spellCheck={false}
@@ -283,11 +278,11 @@ function SandboxControls({ environmentId }: { readonly environmentId: Environmen
               }
             />
           )}
-          <SettingsSearchTarget id={searchableSetting("sandbox-variables").id}>
+          <SettingsSearchTarget id={searchableSetting("cube-variables").id}>
             <EnvironmentVariablesEditor
               description="Every new cube starts with these, such as CLAUDE_CODE_OAUTH_TOKEN from `claude setup-token`. Cubes keep the values they were created with."
-              environment={settings.sandboxEnvironment}
-              onChange={(sandboxEnvironment) => void save({ sandboxEnvironment })}
+              environment={settings.cubeEnvironment}
+              onChange={(cubeEnvironment) => void save({ cubeEnvironment })}
             />
           </SettingsSearchTarget>
         </>
@@ -308,13 +303,13 @@ function FlySettings({
   readonly environmentId: EnvironmentId;
   readonly save: (patch: ServerSettingsPatch) => Promise<unknown>;
 }) {
-  const saved = useEnvironmentSettings(environmentId, (settings) => settings.sandboxFly);
+  const saved = useEnvironmentSettings(environmentId, (settings) => settings.cubeFly);
   const hasToken = saved.apiToken.length > 0;
   const accountQuery = useEnvironmentQuery(
-    hasToken ? sandboxEnvironment.flyAccount({ environmentId, input: {} }) : null,
+    hasToken ? cubeEnvironment.flyAccount({ environmentId, input: {} }) : null,
   );
   const account = accountQuery.data;
-  const checkToken = useAtomCommand(sandboxEnvironment.checkFlyToken, { reportFailure: false });
+  const checkToken = useAtomCommand(cubeEnvironment.checkFlyToken, { reportFailure: false });
   const [checkError, setCheckError] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const [checking, setChecking] = useState(false);
@@ -334,7 +329,7 @@ function FlySettings({
       const found = result.value;
       setCheckError(null);
       await save({
-        sandboxFly: {
+        cubeFly: {
           apiToken,
           organization:
             found.organizations.find((org) => org.slug === saved.organization)?.slug ??
@@ -353,7 +348,7 @@ function FlySettings({
   return (
     <>
       <SettingsRow
-        {...searchableSetting("sandbox-fly-token")}
+        {...searchableSetting("cube-fly-token")}
         description={
           error ??
           (hasToken
@@ -388,7 +383,7 @@ function FlySettings({
                 type="button"
                 size="sm"
                 variant="outline"
-                onClick={() => void save({ sandboxFly: { apiToken: "" } })}
+                onClick={() => void save({ cubeFly: { apiToken: "" } })}
               >
                 Disconnect
               </Button>
@@ -399,15 +394,14 @@ function FlySettings({
       {hasToken ? (
         <>
           <SettingsRow
-            {...searchableSetting("sandbox-fly-organization")}
+            {...searchableSetting("cube-fly-organization")}
             description="The Fly organization cubes are created and billed in."
             control={
               account && account.organizations.length > 0 ? (
                 <Select
                   value={saved.organization}
                   onValueChange={(value) => {
-                    if (typeof value === "string")
-                      void save({ sandboxFly: { organization: value } });
+                    if (typeof value === "string") void save({ cubeFly: { organization: value } });
                   }}
                 >
                   <SelectTrigger size="sm" className="w-full sm:w-56" aria-label="Fly organization">
@@ -431,7 +425,7 @@ function FlySettings({
                   className="w-full sm:w-56"
                   value={saved.organization}
                   placeholder="personal"
-                  onCommit={(value) => void save({ sandboxFly: { organization: value.trim() } })}
+                  onCommit={(value) => void save({ cubeFly: { organization: value.trim() } })}
                   spellCheck={false}
                   aria-label="Fly organization"
                 />
@@ -439,14 +433,14 @@ function FlySettings({
             }
           />
           <SettingsRow
-            {...searchableSetting("sandbox-fly-region")}
+            {...searchableSetting("cube-fly-region")}
             description="Where cubes run. The closest region keeps the desktop and terminal responsive."
             control={
               account ? (
                 <Select
                   value={saved.region}
                   onValueChange={(value) => {
-                    if (typeof value === "string") void save({ sandboxFly: { region: value } });
+                    if (typeof value === "string") void save({ cubeFly: { region: value } });
                   }}
                 >
                   <SelectTrigger size="sm" className="w-full sm:w-56" aria-label="Fly region">
@@ -471,7 +465,7 @@ function FlySettings({
                   className="w-full sm:w-56"
                   value={saved.region}
                   placeholder="syd"
-                  onCommit={(value) => void save({ sandboxFly: { region: value.trim() } })}
+                  onCommit={(value) => void save({ cubeFly: { region: value.trim() } })}
                   spellCheck={false}
                   aria-label="Fly region"
                 />

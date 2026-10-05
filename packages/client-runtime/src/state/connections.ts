@@ -163,7 +163,7 @@ export function createEnvironmentCatalogAtoms<R, E>(
   });
   /**
    * Connects an environment because something needs it now, waking one that
-   * connects only when needed (a sleeping sandbox). Not serialised with the
+   * connects only when needed (a sleeping cube). Not serialised with the
    * other catalog commands, since waking can take a few seconds.
    */
   const connect = createRuntimeCommand(runtime, {

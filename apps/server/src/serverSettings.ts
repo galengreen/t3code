@@ -144,8 +144,8 @@ function providerEnvironmentSecretName(input: {
   return `provider-env-${Buffer.from(input.instanceId, "utf8").toString("base64url")}-${Buffer.from(input.name, "utf8").toString("base64url")}`;
 }
 
-function sandboxEnvironmentSecretName(name: string): string {
-  return `sandbox-env-${Buffer.from(name, "utf8").toString("base64url")}`;
+function cubeEnvironmentSecretName(name: string): string {
+  return `cube-env-${Buffer.from(name, "utf8").toString("base64url")}`;
 }
 
 /**
@@ -182,11 +182,11 @@ const SECRET_STRING_FIELDS: ReadonlyArray<{
     set: (settings, apiToken) => ({ ...settings, bitbucket: { ...settings.bitbucket, apiToken } }),
   },
   {
-    secretName: "sandbox-fly-api-token",
-    get: (settings) => settings.sandboxFly.apiToken,
+    secretName: "cube-fly-api-token",
+    get: (settings) => settings.cubeFly.apiToken,
     set: (settings, apiToken) => ({
       ...settings,
-      sandboxFly: { ...settings.sandboxFly, apiToken },
+      cubeFly: { ...settings.cubeFly, apiToken },
     }),
   },
 ];
@@ -229,12 +229,12 @@ export function redactServerSettingsForClient(settings: ServerSettings): ServerS
       },
     ]),
   );
-  const sandboxEnvironment = settings.sandboxEnvironment.map(redactProviderEnvironmentVariable);
+  const cubeEnvironment = settings.cubeEnvironment.map(redactProviderEnvironmentVariable);
   let redacted: ServerSettings = {
     ...settings,
     providerInstances: providerInstances as ServerSettings["providerInstances"],
     usageLimitSources: usageLimitSources as ServerSettings["usageLimitSources"],
-    sandboxEnvironment,
+    cubeEnvironment,
   };
   for (const field of SECRET_STRING_FIELDS) {
     redacted = field.set(redacted, redactSecret(field.get(settings)));
@@ -885,9 +885,9 @@ const make = Effect.gen(function* () {
           environment,
         } satisfies ProviderInstanceConfig;
       }
-      const sandboxEnvironment = yield* materializeEnvironment(
-        settings.sandboxEnvironment,
-        sandboxEnvironmentSecretName,
+      const cubeEnvironment = yield* materializeEnvironment(
+        settings.cubeEnvironment,
+        cubeEnvironmentSecretName,
         {},
       );
       const usageLimitSources: Record<string, UsageLimitSourceConfig> = {};
@@ -912,7 +912,7 @@ const make = Effect.gen(function* () {
         ...settings,
         providerInstances: providerInstances as ServerSettings["providerInstances"],
         usageLimitSources: usageLimitSources as ServerSettings["usageLimitSources"],
-        sandboxEnvironment,
+        cubeEnvironment,
       };
       for (const field of SECRET_STRING_FIELDS) {
         if (field.get(materialized) !== SECRET_REDACTED) continue;
@@ -1048,10 +1048,10 @@ const make = Effect.gen(function* () {
           } satisfies ProviderInstanceConfig;
         }
       }
-      const sandboxEnvironment = persistEnvironment(
-        current.sandboxEnvironment,
-        next.sandboxEnvironment,
-        sandboxEnvironmentSecretName,
+      const cubeEnvironment = persistEnvironment(
+        current.cubeEnvironment,
+        next.cubeEnvironment,
+        cubeEnvironmentSecretName,
         {},
         changes,
       );
@@ -1088,7 +1088,7 @@ const make = Effect.gen(function* () {
         ...next,
         providerInstances: providerInstances as ServerSettings["providerInstances"],
         usageLimitSources: usageLimitSources as ServerSettings["usageLimitSources"],
-        sandboxEnvironment,
+        cubeEnvironment,
       };
       for (const field of SECRET_STRING_FIELDS) {
         let value = field.get(persisted);

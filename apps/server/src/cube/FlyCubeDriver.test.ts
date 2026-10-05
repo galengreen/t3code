@@ -5,7 +5,7 @@ import * as Schema from "effect/Schema";
 import { HttpClient, HttpClientResponse, UrlParams } from "effect/unstable/http";
 
 import * as ServerSettings from "../serverSettings.ts";
-import * as FlySandboxDriver from "./FlySandboxDriver.ts";
+import * as FlyCubeDriver from "./FlyCubeDriver.ts";
 
 const parseJson = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Unknown));
 const toJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
@@ -121,12 +121,12 @@ const fakeFly = (
 
 const run = <A, E>(
   fly: ReturnType<typeof fakeFly>,
-  use: (driver: Effect.Success<typeof FlySandboxDriver.make>) => Effect.Effect<A, E>,
-  sandboxFly = { apiToken: "FlyV1 fm2_secret", organization: "personal", region: "syd" },
+  use: (driver: Effect.Success<typeof FlyCubeDriver.make>) => Effect.Effect<A, E>,
+  cubeFly = { apiToken: "FlyV1 fm2_secret", organization: "personal", region: "syd" },
 ) =>
-  FlySandboxDriver.make.pipe(
+  FlyCubeDriver.make.pipe(
     Effect.flatMap(use),
-    Effect.provide(ServerSettings.layerTest({ sandboxFly })),
+    Effect.provide(ServerSettings.layerTest({ cubeFly })),
     Effect.provideService(HttpClient.HttpClient, fly.client),
   );
 
@@ -134,7 +134,7 @@ const spec = {
   id: "abc123def456",
   environmentId: EnvironmentId.make("2f6c0c1e-9d0a-4b7e-8f53-1f0c2a7d9b10"),
   label: "Fix login",
-  image: "registry.fly.io/t3-sandbox:latest",
+  image: "registry.fly.io/t3-cube:latest",
   size: "small" as const,
   environment: [
     { name: "CLAUDE_CODE_OAUTH_TOKEN", value: "sk-ant-oat-secret", sensitive: true },
@@ -143,13 +143,13 @@ const spec = {
   spare: null,
 };
 
-describe("FlySandboxDriver", () => {
-  it.effect("creates one app per sandbox with secrets kept out of the machine config", () => {
+describe("FlyCubeDriver", () => {
+  it.effect("creates one app per cube with secrets kept out of the machine config", () => {
     const fly = fakeFly();
     return run(fly, (driver) =>
       Effect.gen(function* () {
         yield* driver.create(spec);
-        const app = fly.apps.get("t3-sbx-abc123def456")!;
+        const app = fly.apps.get("t3-cube-abc123def456")!;
         expect(app.ips).toEqual(["shared_v4", "v6"]);
         expect(app.secrets).toEqual({ CLAUDE_CODE_OAUTH_TOKEN: "sk-ant-oat-secret" });
         const create = fly.calls.find((call) => call.path.endsWith("/machines") && call.body)!;
@@ -176,7 +176,7 @@ describe("FlySandboxDriver", () => {
             createdAt: "2026-10-04T00:00:00Z",
             stoppedAt: null,
             environmentId: spec.environmentId,
-            httpBaseUrl: "https://t3-sbx-abc123def456.fly.dev",
+            httpBaseUrl: "https://t3-cube-abc123def456.fly.dev",
             spare: null,
           },
         ]);
@@ -192,7 +192,7 @@ describe("FlySandboxDriver", () => {
         yield* driver.park(spec.id);
         const [parked] = yield* driver.list;
         expect(parked).toMatchObject({ state: "stopped", spare: "fingerprint" });
-        expect(fly.apps.get("t3-sbx-abc123def456")!.machines[0]!.state).toBe("suspended");
+        expect(fly.apps.get("t3-cube-abc123def456")!.machines[0]!.state).toBe("suspended");
 
         yield* driver.claim(spec.id);
         expect((yield* driver.list)[0]?.spare).toBeNull();
@@ -202,17 +202,17 @@ describe("FlySandboxDriver", () => {
     );
   });
 
-  it.effect("deletes only a machine that is not running, so a sandbox just woken is kept", () => {
+  it.effect("deletes only a machine that is not running, so a cube just woken is kept", () => {
     const fly = fakeFly();
     return run(fly, (driver) =>
       Effect.gen(function* () {
         yield* driver.create(spec);
         expect(yield* driver.removeIfStopped(spec.id)).toBe(false);
-        expect(fly.apps.has("t3-sbx-abc123def456")).toBe(true);
+        expect(fly.apps.has("t3-cube-abc123def456")).toBe(true);
 
         yield* driver.park(spec.id);
         expect(yield* driver.removeIfStopped(spec.id)).toBe(true);
-        expect(fly.apps.has("t3-sbx-abc123def456")).toBe(false);
+        expect(fly.apps.has("t3-cube-abc123def456")).toBe(false);
       }),
     );
   });
@@ -223,7 +223,7 @@ describe("FlySandboxDriver", () => {
       Effect.gen(function* () {
         yield* driver.create({ ...spec, spare: "fingerprint" });
         yield* driver.park(spec.id);
-        expect(fly.apps.get("t3-sbx-abc123def456")!.machines[0]!.state).toBe("stopped");
+        expect(fly.apps.get("t3-cube-abc123def456")!.machines[0]!.state).toBe("stopped");
       }),
     );
   });
@@ -244,7 +244,7 @@ describe("FlySandboxDriver", () => {
     return run(fly, (driver) =>
       Effect.gen(function* () {
         const error = yield* driver.create(spec).pipe(Effect.flip);
-        expect(error._tag).toBe("SandboxOperationError");
+        expect(error._tag).toBe("CubeOperationError");
         expect(fly.apps.size).toBe(0);
       }),
     );
@@ -259,7 +259,7 @@ describe("FlySandboxDriver", () => {
         expect((yield* driver.find(spec.id, "stop")).state).toBe("stopped");
         yield* driver.start(spec.id);
         expect((yield* driver.find(spec.id, "start")).httpBaseUrl).toBe(
-          "https://t3-sbx-abc123def456.fly.dev",
+          "https://t3-cube-abc123def456.fly.dev",
         );
         yield* driver.exec(
           spec.id,
@@ -279,7 +279,7 @@ describe("FlySandboxDriver", () => {
         yield* driver.remove(spec.id);
         expect(fly.apps.size).toBe(0);
         const missing = yield* driver.find(spec.id, "start").pipe(Effect.flip);
-        expect(missing._tag).toBe("SandboxNotFoundError");
+        expect(missing._tag).toBe("CubeNotFoundError");
       }),
     );
   });
@@ -292,7 +292,7 @@ describe("FlySandboxDriver", () => {
         Effect.gen(function* () {
           expect(yield* driver.list).toEqual([]);
           const error = yield* driver.create(spec).pipe(Effect.flip);
-          expect(error._tag).toBe("SandboxUnavailableError");
+          expect(error._tag).toBe("CubeUnavailableError");
           expect(fly.calls).toEqual([]);
         }),
       { apiToken: "", organization: "", region: "" },
@@ -301,7 +301,7 @@ describe("FlySandboxDriver", () => {
 
   it.effect("reads a token's organizations and Fly's regions as the API sends them", () =>
     Effect.gen(function* () {
-      const account = yield* FlySandboxDriver.flyAccount("FlyV1 fm2_secret").pipe(
+      const account = yield* FlyCubeDriver.flyAccount("FlyV1 fm2_secret").pipe(
         Effect.provideService(
           HttpClient.HttpClient,
           HttpClient.make((request) =>
@@ -310,7 +310,7 @@ describe("FlySandboxDriver", () => {
                 request,
                 Response.json(
                   request.url.endsWith("/v1/tokens/current")
-                    ? { tokens: [{ org_slug: "t3-sandboxes", organization: "T3 Sandboxes" }] }
+                    ? { tokens: [{ org_slug: "t3-cubes", organization: "T3 Cubes" }] }
                     : {
                         Regions: [
                           { code: "syd", name: "Sydney, Australia", deprecated: false },
@@ -326,7 +326,7 @@ describe("FlySandboxDriver", () => {
         ),
       );
       expect(account).toEqual({
-        organizations: [{ slug: "t3-sandboxes", name: "T3 Sandboxes" }],
+        organizations: [{ slug: "t3-cubes", name: "T3 Cubes" }],
         regions: [
           { code: "ams", name: "Amsterdam, Netherlands" },
           { code: "syd", name: "Sydney, Australia" },
@@ -337,10 +337,8 @@ describe("FlySandboxDriver", () => {
   );
 
   it("sends macaroons with their scheme and other tokens as bearer tokens", () => {
-    expect(FlySandboxDriver.flyAuthorization("FlyV1 fm2_abc,fm2_def")).toBe(
-      "FlyV1 fm2_abc,fm2_def",
-    );
-    expect(FlySandboxDriver.flyAuthorization("fm2_abc")).toBe("FlyV1 fm2_abc");
-    expect(FlySandboxDriver.flyAuthorization("plain-token")).toBe("Bearer plain-token");
+    expect(FlyCubeDriver.flyAuthorization("FlyV1 fm2_abc,fm2_def")).toBe("FlyV1 fm2_abc,fm2_def");
+    expect(FlyCubeDriver.flyAuthorization("fm2_abc")).toBe("FlyV1 fm2_abc");
+    expect(FlyCubeDriver.flyAuthorization("plain-token")).toBe("Bearer plain-token");
   });
 });

@@ -752,7 +752,7 @@ it.effect("opens a desktop on a host without a device hub, making no hub request
       summary: Effect.succeed({
         id: LOCAL_DEVICE_HOST_ID,
         kind: "local",
-        label: "Sandbox",
+        label: "Cube",
         platforms: [
           { platform: "ios", available: false, reason: "No Xcode" },
           { platform: "android", available: false, reason: "No SDK" },

@@ -43,15 +43,15 @@ import {
 } from "./orchestrationV2.ts";
 import { Project, ProjectMutation, ProjectSnapshot } from "./project.ts";
 import {
-  SandboxCreateInput,
-  SandboxIdInput,
-  SandboxNotFoundError,
-  SandboxNotRunningError,
-  SandboxOperationError,
-  SandboxPairing,
-  SandboxSummary,
-  SandboxUnavailableError,
-} from "./sandbox.ts";
+  CubeCreateInput,
+  CubeIdInput,
+  CubeNotFoundError,
+  CubeNotRunningError,
+  CubeOperationError,
+  CubePairing,
+  CubeSummary,
+  CubeUnavailableError,
+} from "./cube.ts";
 import {
   PullRequestDiffInput,
   PullRequestDiffResult,
@@ -584,64 +584,64 @@ class EnvironmentProjectsHttpApi extends HttpApiGroup.make("projects")
     }).middleware(EnvironmentAuthenticatedAuth),
   ) {}
 
-const EnvironmentSandboxErrors = [
-  SandboxUnavailableError,
-  SandboxNotFoundError,
-  SandboxNotRunningError,
-  SandboxOperationError,
+const EnvironmentCubeErrors = [
+  CubeUnavailableError,
+  CubeNotFoundError,
+  CubeNotRunningError,
+  CubeOperationError,
   EnvironmentScopeRequiredError,
   EnvironmentInternalError,
 ] as const;
 
 /**
- * The host's sandboxes, for `t3 sandbox` commands: they run through the live
+ * The host's cubes, for `t3 cube` commands: they run through the live
  * server, so its locks and spare are the only ones in play.
  */
-class EnvironmentSandboxesHttpApi extends HttpApiGroup.make("sandboxes")
+class EnvironmentCubesHttpApi extends HttpApiGroup.make("cubes")
   .add(
-    HttpApiEndpoint.get("list", "/api/sandboxes", {
+    HttpApiEndpoint.get("list", "/api/cubes", {
       headers: OptionalBearerHeaders,
-      success: Schema.Array(SandboxSummary),
-      error: EnvironmentSandboxErrors,
+      success: Schema.Array(CubeSummary),
+      error: EnvironmentCubeErrors,
     }).middleware(EnvironmentAuthenticatedAuth),
   )
   .add(
-    HttpApiEndpoint.post("create", "/api/sandboxes/create", {
+    HttpApiEndpoint.post("create", "/api/cubes/create", {
       headers: OptionalBearerHeaders,
-      payload: SandboxCreateInput,
-      success: SandboxSummary,
-      error: EnvironmentSandboxErrors,
+      payload: CubeCreateInput,
+      success: CubeSummary,
+      error: EnvironmentCubeErrors,
     }).middleware(EnvironmentAuthenticatedAuth),
   )
   .add(
-    HttpApiEndpoint.post("start", "/api/sandboxes/start", {
+    HttpApiEndpoint.post("start", "/api/cubes/start", {
       headers: OptionalBearerHeaders,
-      payload: SandboxIdInput,
-      success: SandboxSummary,
-      error: EnvironmentSandboxErrors,
+      payload: CubeIdInput,
+      success: CubeSummary,
+      error: EnvironmentCubeErrors,
     }).middleware(EnvironmentAuthenticatedAuth),
   )
   .add(
-    HttpApiEndpoint.post("stop", "/api/sandboxes/stop", {
+    HttpApiEndpoint.post("stop", "/api/cubes/stop", {
       headers: OptionalBearerHeaders,
-      payload: SandboxIdInput,
-      success: SandboxSummary,
-      error: EnvironmentSandboxErrors,
+      payload: CubeIdInput,
+      success: CubeSummary,
+      error: EnvironmentCubeErrors,
     }).middleware(EnvironmentAuthenticatedAuth),
   )
   .add(
-    HttpApiEndpoint.post("remove", "/api/sandboxes/remove", {
+    HttpApiEndpoint.post("remove", "/api/cubes/remove", {
       headers: OptionalBearerHeaders,
-      payload: SandboxIdInput,
-      error: EnvironmentSandboxErrors,
+      payload: CubeIdInput,
+      error: EnvironmentCubeErrors,
     }).middleware(EnvironmentAuthenticatedAuth),
   )
   .add(
-    HttpApiEndpoint.post("pair", "/api/sandboxes/pair", {
+    HttpApiEndpoint.post("pair", "/api/cubes/pair", {
       headers: OptionalBearerHeaders,
-      payload: SandboxIdInput,
-      success: SandboxPairing,
-      error: EnvironmentSandboxErrors,
+      payload: CubeIdInput,
+      success: CubePairing,
+      error: EnvironmentCubeErrors,
     }).middleware(EnvironmentAuthenticatedAuth),
   ) {}
 
@@ -728,5 +728,5 @@ export class EnvironmentHttpApi extends HttpApi.make("environment")
   .add(EnvironmentOrchestrationHttpApi)
   .add(EnvironmentPullRequestsHttpApi)
   .add(EnvironmentProjectsHttpApi)
-  .add(EnvironmentSandboxesHttpApi)
+  .add(EnvironmentCubesHttpApi)
   .add(EnvironmentConnectHttpApi) {}

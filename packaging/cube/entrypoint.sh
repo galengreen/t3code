@@ -1,20 +1,20 @@
 #!/bin/sh
-# Starts the sandbox's T3 server, and nothing else, so a sandbox answers as
-# soon as the server does. Repositories arrive later through t3-sandbox-clone.
+# Starts the cube's T3 server, and nothing else, so a cube answers as
+# soon as the server does. Repositories arrive later through t3-cube-clone.
 #
 # Env:
-#   T3_SANDBOX_LABEL   the environment's name
+#   T3_CUBE_LABEL   the environment's name
 #   T3_ENVIRONMENT_ID  environment id chosen by the host, adopted on first start
 #   T3_HOST            address the server binds (default: 0.0.0.0)
 set -eu
 
 # The server reports PRETTY_HOSTNAME from /etc/machine-info as its name.
-if [ -n "${T3_SANDBOX_LABEL:-}" ]; then
-  printf 'PRETTY_HOSTNAME="%s"\n' "$(printf '%s' "$T3_SANDBOX_LABEL" | tr -d '"')" \
+if [ -n "${T3_CUBE_LABEL:-}" ]; then
+  printf 'PRETTY_HOSTNAME="%s"\n' "$(printf '%s' "$T3_CUBE_LABEL" | tr -d '"')" \
     | sudo tee /etc/machine-info >/dev/null
 fi
 
-# The host records the id so it can match the sandbox to its threads while it
+# The host records the id so it can match the cube to its threads while it
 # sleeps. The server keeps whatever id it finds, so only a fresh home is seeded.
 if [ -n "${T3_ENVIRONMENT_ID:-}" ] && [ ! -s "$HOME/.t3/userdata/environment-id" ]; then
   mkdir -p "$HOME/.t3/userdata"

@@ -5,11 +5,7 @@ import { useEffect, useState } from "react";
 import { Button } from "~/components/ui/button";
 import { Spinner } from "~/components/ui/spinner";
 import { cn } from "~/lib/utils";
-import type {
-  SandboxLaunchStage,
-  SandboxLaunchStageId,
-  SandboxLaunchState,
-} from "./useSandboxDraftLaunch";
+import type { CubeLaunchStage, CubeLaunchStageId, CubeLaunchState } from "./useCubeDraftLaunch";
 import { WorkLogRow } from "./WorkLog";
 
 /** Ticks once a second while the launch runs, for the elapsed labels. */
@@ -23,7 +19,7 @@ function useNowWhile(active: boolean): number {
   return nowMs;
 }
 
-function stageLabel(id: SandboxLaunchStageId, repositoryName: string | null): string {
+function stageLabel(id: CubeLaunchStageId, repositoryName: string | null): string {
   switch (id) {
     case "create":
       return "Start cube";
@@ -36,7 +32,7 @@ function stageLabel(id: SandboxLaunchStageId, repositoryName: string | null): st
   }
 }
 
-function StageIcon({ status }: { status: SandboxLaunchStage["status"] }) {
+function StageIcon({ status }: { status: CubeLaunchStage["status"] }) {
   const className = "size-4 shrink-0 stroke-2";
   switch (status) {
     case "done":
@@ -52,11 +48,11 @@ function StageIcon({ status }: { status: SandboxLaunchStage["status"] }) {
 
 /**
  * Stands in for the composer while a draft's first message waits for its new
- * sandbox: the message as it will be sent, then each setup stage with its
+ * cube: the message as it will be sent, then each setup stage with its
  * time. A failed launch keeps the message and offers to retry, run it on
  * this machine instead, or go back to editing it.
  */
-export function SandboxLaunchCard({
+export function CubeLaunchCard({
   state,
   prompt,
   repositoryName,
@@ -64,7 +60,7 @@ export function SandboxLaunchCard({
   onRunHere,
   onEdit,
 }: {
-  readonly state: Exclude<SandboxLaunchState, { phase: "idle" }>;
+  readonly state: Exclude<CubeLaunchState, { phase: "idle" }>;
   readonly prompt: string;
   readonly repositoryName: string | null;
   readonly onRetry: () => void;
@@ -79,7 +75,7 @@ export function SandboxLaunchCard({
   return (
     <section
       aria-label="Cube setup"
-      data-sandbox-launch-phase={state.phase}
+      data-cube-launch-phase={state.phase}
       className="flex flex-col gap-4"
     >
       <div className="flex flex-col items-end gap-1">
@@ -114,8 +110,8 @@ export function SandboxLaunchCard({
             return (
               <WorkLogRow
                 key={stage.id}
-                data-sandbox-launch-stage={stage.id}
-                data-sandbox-launch-status={stage.status}
+                data-cube-launch-stage={stage.id}
+                data-cube-launch-status={stage.status}
                 icon={
                   <span
                     className={cn("text-icon-muted", stage.status === "pending" && "opacity-40")}

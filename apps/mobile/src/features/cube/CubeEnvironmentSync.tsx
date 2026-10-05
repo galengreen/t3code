@@ -4,20 +4,20 @@ import { AppState } from "react-native";
 
 import { useServerConfigs } from "../../state/entities";
 import { useRemoteConnectionStatus } from "../../state/use-remote-environment-registry";
-import { syncSandboxes } from "../../state/sandbox";
+import { syncCubes } from "../../state/cube";
 import { useAtomCommand } from "../../state/use-atom-command";
 
 /**
- * Keeps every connected host's sandboxes registered on this phone, so a
- * sandbox created from any device shows up here without pairing by hand.
- * Runs when a sandbox host connects and each time the app comes to the
- * foreground. Registering does not keep sandboxes awake: they connect only
+ * Keeps every connected host's cubes registered on this phone, so a
+ * cube created from any device shows up here without pairing by hand.
+ * Runs when a cube host connects and each time the app comes to the
+ * foreground. Registering does not keep cubes awake: they connect only
  * when a thread in them is opened or sent to.
  */
-export function SandboxEnvironmentSync() {
+export function CubeEnvironmentSync() {
   const { connectedEnvironments } = useRemoteConnectionStatus();
   const serverConfigs = useServerConfigs();
-  const sync = useAtomCommand(syncSandboxes, { reportFailure: false });
+  const sync = useAtomCommand(syncCubes, { reportFailure: false });
   // Cached configs are known before the socket connects, and a request then
   // fails, so a host only counts once it is connected.
   const hostKey = useMemo(
@@ -26,7 +26,7 @@ export function SandboxEnvironmentSync() {
         .filter(
           (environment) =>
             environment.connectionState === "connected" &&
-            serverConfigs.get(environment.environmentId)?.settings.enableSandboxes === true,
+            serverConfigs.get(environment.environmentId)?.settings.enableCubes === true,
         )
         .map((environment) => environment.environmentId)
         .toSorted()

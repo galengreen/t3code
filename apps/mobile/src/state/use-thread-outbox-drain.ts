@@ -650,8 +650,8 @@ export function useThreadOutboxDrain(): void {
   const serverConfigs = useServerConfigs();
   const { connectedEnvironments } = useRemoteConnectionStatus();
   // A message waiting for an environment that connects only when needed (a
-  // sleeping sandbox) is the need: connect it once per wait, so an
-  // unreachable sandbox is not woken again and again.
+  // sleeping cube) is the need: connect it once per wait, so an
+  // unreachable cube is not woken again and again.
   const connectEnvironment = useAtomCommand(environmentCatalog.connect, { reportFailure: false });
   const wokenEnvironmentIdsRef = useRef(new Set<EnvironmentId>());
   useEffect(() => {

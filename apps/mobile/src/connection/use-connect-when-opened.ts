@@ -7,7 +7,7 @@ import { environmentCatalog } from "./catalog";
 
 /**
  * Opening a thread is a need: connects its environment if it connects only
- * when needed (a sleeping sandbox), waking it. Once per opening, so a sandbox
+ * when needed (a sleeping cube), waking it. Once per opening, so a cube
  * that goes to sleep while the thread is open stays asleep until the user
  * sends something.
  */

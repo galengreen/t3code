@@ -38,7 +38,7 @@ export type ConnectionProfile = typeof ConnectionProfile.Type;
 
 /**
  * When a saved environment connects. "always" keeps it connected and retries
- * forever. "needed" is for environments that sleep when unused (sandboxes):
+ * forever. "needed" is for environments that sleep when unused (cubes):
  * they connect when something needs them, since each attempt wakes the machine.
  */
 export type ConnectWhen = "always" | "needed";

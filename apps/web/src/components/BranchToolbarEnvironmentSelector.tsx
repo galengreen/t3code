@@ -25,12 +25,12 @@ import {
 interface BranchToolbarEnvironmentSelectorProps {
   autoEnvironmentLabel?: string | undefined;
   onAutoEnvironment?: (() => void) | undefined;
-  /** Set while the draft will start in a new sandbox; the label to show. */
-  sandboxLabel?: string | undefined;
+  /** Set while the draft will start in a new cube; the label to show. */
+  cubeLabel?: string | undefined;
   /** Offers "New cube" when the current environment can create one. */
-  onSandboxEnvironment?: (() => void) | undefined;
-  /** Shows "New cube" disabled with this reason when the environment hosts sandboxes but this draft cannot use one. */
-  sandboxUnavailableReason?: string | undefined;
+  onCubeEnvironment?: (() => void) | undefined;
+  /** Shows "New cube" disabled with this reason when the environment hosts cubes but this draft cannot use one. */
+  cubeUnavailableReason?: string | undefined;
   envLocked: boolean;
   environmentId: EnvironmentId;
   availableEnvironments: readonly EnvironmentOption[];
@@ -41,9 +41,9 @@ interface BranchToolbarEnvironmentSelectorProps {
 export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvironmentSelector({
   autoEnvironmentLabel,
   onAutoEnvironment,
-  sandboxLabel,
-  onSandboxEnvironment,
-  sandboxUnavailableReason,
+  cubeLabel,
+  onCubeEnvironment,
+  cubeUnavailableReason,
   envLocked,
   environmentId,
   availableEnvironments,
@@ -64,15 +64,9 @@ export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvir
         value: env.environmentId,
         label: env.label,
       })),
-      ...(onSandboxEnvironment ? [{ value: "sandbox", label: sandboxLabel ?? "New cube" }] : []),
+      ...(onCubeEnvironment ? [{ value: "cube", label: cubeLabel ?? "New cube" }] : []),
     ],
-    [
-      availableEnvironments,
-      autoEnvironmentLabel,
-      onAutoEnvironment,
-      onSandboxEnvironment,
-      sandboxLabel,
-    ],
+    [availableEnvironments, autoEnvironmentLabel, onAutoEnvironment, onCubeEnvironment, cubeLabel],
   );
 
   // The static label carries the xs control's height (h-7 sm:h-6) as well as
@@ -109,10 +103,10 @@ export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvir
   return (
     <Select
       modal={false}
-      value={sandboxLabel ? "sandbox" : autoEnvironmentLabel ? "auto" : environmentId}
+      value={cubeLabel ? "cube" : autoEnvironmentLabel ? "auto" : environmentId}
       onValueChange={(value) =>
-        value === "sandbox"
-          ? onSandboxEnvironment?.()
+        value === "cube"
+          ? onCubeEnvironment?.()
           : value === "auto"
             ? onAutoEnvironment?.()
             : onEnvironmentChange(value as EnvironmentId)
@@ -131,7 +125,7 @@ export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvir
             />
           }
         >
-          {sandboxLabel ? (
+          {cubeLabel ? (
             <BoxIcon
               className={
                 displayMode === "panel" ? THREAD_DETAILS_PANEL_ICON_CLASS : "size-3 shrink-0"
@@ -158,8 +152,8 @@ export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvir
           </ComposerContextLabel>
         </TooltipTrigger>
         <TooltipPopup>
-          {sandboxLabel
-            ? `${sandboxLabel} on ${activeEnvironment?.label ?? "this machine"}`
+          {cubeLabel
+            ? `${cubeLabel} on ${activeEnvironment?.label ?? "this machine"}`
             : (autoEnvironmentLabel ?? activeEnvironment?.label ?? "Run on")}
         </TooltipPopup>
       </Tooltip>
@@ -195,21 +189,21 @@ export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvir
               </span>
             </SelectItem>
           ))}
-          {onSandboxEnvironment ? (
-            <SelectItem value="sandbox">
+          {onCubeEnvironment ? (
+            <SelectItem value="cube">
               <span className="inline-flex items-center gap-1.5">
                 <BoxIcon className="size-3" aria-hidden="true" />
-                {sandboxLabel ?? "New cube"}
+                {cubeLabel ?? "New cube"}
               </span>
             </SelectItem>
-          ) : sandboxUnavailableReason ? (
-            <SelectItem value="sandbox" disabled>
+          ) : cubeUnavailableReason ? (
+            <SelectItem value="cube" disabled>
               <span className="flex flex-col">
                 <span className="inline-flex items-center gap-1.5">
                   <BoxIcon className="size-3" aria-hidden="true" />
                   New cube
                 </span>
-                <span className="text-muted-foreground text-xs">{sandboxUnavailableReason}</span>
+                <span className="text-muted-foreground text-xs">{cubeUnavailableReason}</span>
               </span>
             </SelectItem>
           ) : null}

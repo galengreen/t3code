@@ -1,4 +1,4 @@
-import type { ContextMenuItem, SandboxState } from "@t3tools/contracts";
+import type { ContextMenuItem, CubeState } from "@t3tools/contracts";
 import type { SnoozePreset } from "@t3tools/client-runtime/state/thread-settled";
 
 /**
@@ -29,10 +29,10 @@ export type ThreadActionMenuId =
   | "copy-thread-id"
   | "archive"
   | "delete"
-  | "sandbox"
-  | "sandbox:start"
-  | "sandbox:stop"
-  | "sandbox:delete";
+  | "cube"
+  | "cube:start"
+  | "cube:stop"
+  | "cube:delete";
 
 export type DraftActionMenuId =
   | "copy"
@@ -103,13 +103,13 @@ export interface ThreadActionMenuState {
   };
   readonly snoozePresets: ReadonlyArray<SnoozePreset>;
   /**
-   * The machine the thread runs in, when it is a sandbox. One that wakes on
+   * The machine the thread runs in, when it is a cube. One that wakes on
    * request (Fly) wakes when its thread is opened, so it offers no Start.
    */
-  readonly sandbox?: { readonly state: SandboxState; readonly wakesOnRequest: boolean } | null;
+  readonly cube?: { readonly state: CubeState; readonly wakesOnRequest: boolean } | null;
 }
 
-const SANDBOX_STATE_LABELS: Record<SandboxState, string> = {
+const CUBE_STATE_LABELS: Record<CubeState, string> = {
   running: "running",
   stopped: "stopped",
   failed: "failed",
@@ -233,33 +233,31 @@ export function buildThreadActionMenuItems(
     { id: "project-settings", label: "Project settings", icon: "settings" },
     // The thread's machine: waking it, putting it to sleep to stop billing,
     // and deleting it with its files once the work has shipped.
-    ...(state.sandbox
+    ...(state.cube
       ? [
           {
-            id: "sandbox" as const,
+            id: "cube" as const,
             label: `Cube (${
-              state.sandbox.wakesOnRequest && state.sandbox.state === "stopped"
+              state.cube.wakesOnRequest && state.cube.state === "stopped"
                 ? "asleep"
-                : SANDBOX_STATE_LABELS[state.sandbox.state]
+                : CUBE_STATE_LABELS[state.cube.state]
             })`,
             icon: "box",
             children: [
-              ...(state.sandbox.wakesOnRequest
-                ? state.sandbox.state === "running"
-                  ? [{ id: "sandbox:stop" as const, label: "Put to sleep" }]
+              ...(state.cube.wakesOnRequest
+                ? state.cube.state === "running"
+                  ? [{ id: "cube:stop" as const, label: "Put to sleep" }]
                   : []
                 : [
-                    state.sandbox.state === "running"
-                      ? { id: "sandbox:stop" as const, label: "Stop cube" }
-                      : { id: "sandbox:start" as const, label: "Start cube" },
+                    state.cube.state === "running"
+                      ? { id: "cube:stop" as const, label: "Stop cube" }
+                      : { id: "cube:start" as const, label: "Start cube" },
                   ]),
               {
-                id: "sandbox:delete" as const,
+                id: "cube:delete" as const,
                 label: "Delete cube…",
                 destructive: true,
-                separatorBefore: !(
-                  state.sandbox.wakesOnRequest && state.sandbox.state !== "running"
-                ),
+                separatorBefore: !(state.cube.wakesOnRequest && state.cube.state !== "running"),
               },
             ],
           },

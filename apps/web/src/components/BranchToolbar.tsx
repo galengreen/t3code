@@ -85,9 +85,9 @@ interface BranchToolbarProps {
   onStartFromOriginChange: (startFromOrigin: boolean) => void;
   autoEnvironmentLabel?: string | undefined;
   onAutoEnvironment?: (() => void) | undefined;
-  sandboxLabel?: string | undefined;
-  onSandboxEnvironment?: (() => void) | undefined;
-  sandboxUnavailableReason?: string | undefined;
+  cubeLabel?: string | undefined;
+  onCubeEnvironment?: (() => void) | undefined;
+  cubeUnavailableReason?: string | undefined;
   envLocked: boolean;
   onCheckoutPullRequestRequest?: (reference: string) => void;
   onComposerFocusRequest?: () => void;
@@ -101,9 +101,9 @@ interface MobileRunContextSelectorProps {
   forceNewWorktree: boolean;
   autoEnvironmentLabel?: string | undefined;
   onAutoEnvironment?: (() => void) | undefined;
-  sandboxLabel?: string | undefined;
-  onSandboxEnvironment?: (() => void) | undefined;
-  sandboxUnavailableReason?: string | undefined;
+  cubeLabel?: string | undefined;
+  onCubeEnvironment?: (() => void) | undefined;
+  cubeUnavailableReason?: string | undefined;
   envLocked: boolean;
   envModeLocked: boolean;
   environmentId: EnvironmentId;
@@ -123,9 +123,9 @@ const MobileRunContextSelector = memo(function MobileRunContextSelector({
   forceNewWorktree,
   autoEnvironmentLabel,
   onAutoEnvironment,
-  sandboxLabel,
-  onSandboxEnvironment,
-  sandboxUnavailableReason,
+  cubeLabel,
+  onCubeEnvironment,
+  cubeUnavailableReason,
   envLocked,
   envModeLocked,
   environmentId,
@@ -173,7 +173,7 @@ const MobileRunContextSelector = memo(function MobileRunContextSelector({
     <span className="inline-flex shrink-0 items-center gap-0.5">
       <Tooltip>
         <TooltipTrigger render={<span className="inline-flex shrink-0" />}>
-          {sandboxLabel ? (
+          {cubeLabel ? (
             <BoxIcon className="size-3 shrink-0 mx-0!" aria-hidden="true" />
           ) : autoEnvironmentLabel ? (
             <ScaleIcon className="size-3 shrink-0 mx-0!" aria-hidden="true" />
@@ -185,7 +185,7 @@ const MobileRunContextSelector = memo(function MobileRunContextSelector({
           )}
         </TooltipTrigger>
         <TooltipPopup>
-          {sandboxLabel ?? autoEnvironmentLabel ?? activeEnvironment?.label ?? "Run on"}
+          {cubeLabel ?? autoEnvironmentLabel ?? activeEnvironment?.label ?? "Run on"}
         </TooltipPopup>
       </Tooltip>
       {workspaceIcon}
@@ -197,7 +197,7 @@ const MobileRunContextSelector = memo(function MobileRunContextSelector({
     <>
       {icon}
       <ComposerContextLabel>
-        {sandboxLabel ??
+        {cubeLabel ??
           autoEnvironmentLabel ??
           (showEnvironmentIndicator ? (activeEnvironment?.label ?? "Run on") : workspaceLabel)}
       </ComposerContextLabel>
@@ -240,10 +240,10 @@ const MobileRunContextSelector = memo(function MobileRunContextSelector({
             <MenuGroup>
               <MenuGroupLabel>Run on</MenuGroupLabel>
               <MenuRadioGroup
-                value={sandboxLabel ? "sandbox" : autoEnvironmentLabel ? "auto" : environmentId}
+                value={cubeLabel ? "cube" : autoEnvironmentLabel ? "auto" : environmentId}
                 onValueChange={(value) =>
-                  value === "sandbox"
-                    ? onSandboxEnvironment?.()
+                  value === "cube"
+                    ? onCubeEnvironment?.()
                     : value === "auto"
                       ? onAutoEnvironment?.()
                       : onEnvironmentChange(value as EnvironmentId)
@@ -279,23 +279,21 @@ const MobileRunContextSelector = memo(function MobileRunContextSelector({
                     </span>
                   </MenuRadioItem>
                 ))}
-                {onSandboxEnvironment ? (
-                  <MenuRadioItem value="sandbox" disabled={envLocked} closeOnClick>
+                {onCubeEnvironment ? (
+                  <MenuRadioItem value="cube" disabled={envLocked} closeOnClick>
                     <span className="flex min-w-0 items-center gap-1.5">
                       <BoxIcon className="size-3" aria-hidden="true" />
-                      <span className="min-w-0 truncate">{sandboxLabel ?? "New cube"}</span>
+                      <span className="min-w-0 truncate">{cubeLabel ?? "New cube"}</span>
                     </span>
                   </MenuRadioItem>
-                ) : sandboxUnavailableReason ? (
-                  <MenuRadioItem value="sandbox" disabled>
+                ) : cubeUnavailableReason ? (
+                  <MenuRadioItem value="cube" disabled>
                     <span className="flex min-w-0 flex-col">
                       <span className="flex min-w-0 items-center gap-1.5">
                         <BoxIcon className="size-3" aria-hidden="true" />
                         <span className="min-w-0 truncate">New cube</span>
                       </span>
-                      <span className="text-muted-foreground text-xs">
-                        {sandboxUnavailableReason}
-                      </span>
+                      <span className="text-muted-foreground text-xs">{cubeUnavailableReason}</span>
                     </span>
                   </MenuRadioItem>
                 ) : null}
@@ -552,9 +550,9 @@ export const BranchToolbar = memo(function BranchToolbar({
   onStartFromOriginChange,
   autoEnvironmentLabel,
   onAutoEnvironment,
-  sandboxLabel,
-  onSandboxEnvironment,
-  sandboxUnavailableReason,
+  cubeLabel,
+  onCubeEnvironment,
+  cubeUnavailableReason,
   envLocked,
   onCheckoutPullRequestRequest,
   onComposerFocusRequest,
@@ -642,7 +640,7 @@ export const BranchToolbar = memo(function BranchToolbar({
 
   const showEnvironmentPicker = Boolean(
     availableEnvironments &&
-    (availableEnvironments.length > 1 || onSandboxEnvironment || sandboxUnavailableReason) &&
+    (availableEnvironments.length > 1 || onCubeEnvironment || cubeUnavailableReason) &&
     onEnvironmentChange,
   );
   const activeEnvironmentOption =
@@ -708,9 +706,9 @@ export const BranchToolbar = memo(function BranchToolbar({
             forceNewWorktree={forceNewWorktree}
             autoEnvironmentLabel={autoEnvironmentLabel}
             onAutoEnvironment={onAutoEnvironment}
-            sandboxLabel={sandboxLabel}
-            onSandboxEnvironment={onSandboxEnvironment}
-            sandboxUnavailableReason={sandboxUnavailableReason}
+            cubeLabel={cubeLabel}
+            onCubeEnvironment={onCubeEnvironment}
+            cubeUnavailableReason={cubeUnavailableReason}
             envLocked={envLocked}
             envModeLocked={envModeLocked}
             environmentId={environmentId}
@@ -740,9 +738,9 @@ export const BranchToolbar = memo(function BranchToolbar({
               <BranchToolbarEnvironmentSelector
                 autoEnvironmentLabel={autoEnvironmentLabel}
                 onAutoEnvironment={onAutoEnvironment}
-                sandboxLabel={sandboxLabel}
-                onSandboxEnvironment={onSandboxEnvironment}
-                sandboxUnavailableReason={sandboxUnavailableReason}
+                cubeLabel={cubeLabel}
+                onCubeEnvironment={onCubeEnvironment}
+                cubeUnavailableReason={cubeUnavailableReason}
                 envLocked={envLocked}
                 environmentId={environmentId}
                 availableEnvironments={availableEnvironments}

@@ -10,8 +10,8 @@ import { HttpClient, HttpClientResponse } from "effect/unstable/http";
 import * as ServerConfig from "../config.ts";
 import * as ProcessRunner from "../processRunner.ts";
 import * as ServerSettings from "../serverSettings.ts";
-import * as SandboxDrivers from "./SandboxDrivers.ts";
-import * as SandboxService from "./SandboxService.ts";
+import * as CubeDrivers from "./CubeDrivers.ts";
+import * as CubeService from "./CubeService.ts";
 
 interface FakeContainer {
   readonly labels: Record<string, string>;
@@ -116,11 +116,11 @@ const fakeDocker = () => {
         volumes.delete(rest.at(-1)!);
         return output("");
       case "exec":
-        if (rest.includes("t3-sandbox-clone") && failingClones.has(rest[2]!)) {
+        if (rest.includes("t3-cube-clone") && failingClones.has(rest[2]!)) {
           return output("", 1, "exec request failed: EOF");
         }
         return output(
-          rest.includes("t3-sandbox-clone")
+          rest.includes("t3-cube-clone")
             ? ""
             : JSON.stringify({
                 id: "x",
@@ -148,21 +148,21 @@ const fakeDocker = () => {
 
 const serviceLayer = (
   docker: ReturnType<typeof fakeDocker>,
-  enableSandboxes = true,
+  enableCubes = true,
   serving: () => boolean = () => true,
-  sandboxKeepReady = false,
+  cubeKeepReady = false,
 ) =>
-  SandboxService.layer.pipe(
-    Layer.provide(SandboxDrivers.layer),
+  CubeService.layer.pipe(
+    Layer.provide(CubeDrivers.layer),
     Layer.provideMerge(
       ServerSettings.layerTest({
-        enableSandboxes,
-        sandboxImage: "sandbox:test",
-        sandboxPublishHost: "100.64.0.7",
-        sandboxKeepReady,
-        sandboxEnvironment: [
+        enableCubes,
+        cubeImage: "cube:test",
+        cubePublishHost: "100.64.0.7",
+        cubeKeepReady,
+        cubeEnvironment: [
           { name: "CLAUDE_CODE_OAUTH_TOKEN", value: "sk-ant-oat-secret", sensitive: true },
-          { name: "GIT_AUTHOR_NAME", value: "Sandbox", sensitive: false },
+          { name: "GIT_AUTHOR_NAME", value: "Cube", sensitive: false },
         ],
       }),
     ),
@@ -179,7 +179,7 @@ const serviceLayer = (
             HttpClientResponse.fromWeb(
               request,
               serving()
-                ? Response.json({ environmentId: "env-sandbox" })
+                ? Response.json({ environmentId: "env-cube" })
                 : new Response(null, { status: 502 }),
             ),
           ),
@@ -188,60 +188,60 @@ const serviceLayer = (
     ),
     Layer.provide(NodeCrypto.layer),
     Layer.provideMerge(
-      Layer.fresh(ServerConfig.layerTest(process.cwd(), { prefix: "t3code-sandbox-test-" })),
+      Layer.fresh(ServerConfig.layerTest(process.cwd(), { prefix: "t3code-cube-test-" })),
     ),
     Layer.provideMerge(NodeServices.layer),
   );
 
 /** Refills the spare, letting a new one settle (a minute) before it is parked. */
-const refillSpare = (sandboxes: SandboxService.SandboxService["Service"]) =>
+const refillSpare = (cubes: CubeService.CubeService["Service"]) =>
   Effect.gen(function* () {
-    const refill = yield* Effect.forkChild(sandboxes.keepSpareReady);
+    const refill = yield* Effect.forkChild(cubes.keepSpareReady);
     yield* TestClock.adjust("2 minutes");
     yield* Fiber.join(refill);
   });
 
-describe("SandboxService", () => {
+describe("CubeService", () => {
   it.effect(
     "creates a labelled container on host loopback and clones into it once it answers",
     () => {
       const docker = fakeDocker();
       return Effect.gen(function* () {
-        const sandboxes = yield* SandboxService.SandboxService;
-        const created = yield* sandboxes.create({
+        const cubes = yield* CubeService.CubeService;
+        const created = yield* cubes.create({
           repositoryUrl: "https://github.com/example/app.git",
         });
         expect(created).toMatchObject({
           label: `Cube ${created.id.slice(0, 6)}`,
-          image: "sandbox:test",
+          image: "cube:test",
           state: "running",
           httpBaseUrl: "http://100.64.0.7:49999",
         });
         expect(created.id).toMatch(/^[0-9a-f]{12}$/);
         // The host chooses the environment id and the image adopts it, so the
-        // sandbox can be matched to its threads even while it is stopped.
+        // cube can be matched to its threads even while it is stopped.
         expect(created.environmentId).toMatch(/^[0-9a-f-]{36}$/);
         const run = docker.calls.find((args) => args[0] === "run")!;
         expect(run).toEqual(
           expect.arrayContaining([
             "--publish",
             "100.64.0.7::7777/tcp",
-            `t3code.sandbox.id=${created.id}`,
-            `t3-sandbox-${created.id}-home:/home/dev`,
-            `T3_SANDBOX_LABEL=Cube ${created.id.slice(0, 6)}`,
+            `t3code.cube.id=${created.id}`,
+            `t3-cube-${created.id}-home:/home/dev`,
+            `T3_CUBE_LABEL=Cube ${created.id.slice(0, 6)}`,
             `T3_ENVIRONMENT_ID=${created.environmentId}`,
-            `t3code.sandbox.environment=${created.environmentId}`,
+            `t3code.cube.environment=${created.environmentId}`,
           ]),
         );
         expect(docker.calls.at(-1)).toEqual([
           "exec",
           "--user",
           "dev",
-          `t3-sandbox-${created.id}`,
-          "t3-sandbox-clone",
+          `t3-cube-${created.id}`,
+          "t3-cube-clone",
           "https://github.com/example/app.git",
         ]);
-        expect((yield* sandboxes.list).map((sandbox) => sandbox.id)).toEqual([created.id]);
+        expect((yield* cubes.list).map((cube) => cube.id)).toEqual([created.id]);
       }).pipe(Effect.provide(serviceLayer(docker)));
     },
   );
@@ -249,194 +249,186 @@ describe("SandboxService", () => {
   it.effect("keeps one spare parked and hands it to the next create", () => {
     const docker = fakeDocker();
     return Effect.gen(function* () {
-      const sandboxes = yield* SandboxService.SandboxService;
-      yield* refillSpare(sandboxes);
+      const cubes = yield* CubeService.CubeService;
+      yield* refillSpare(cubes);
       const [spareName, spare] = [...docker.containers][0]!;
       expect(spareName).toMatch(/^t3-spare-/);
       expect(spare!.status).toBe("paused");
       // Clients never see a spare.
-      expect(yield* sandboxes.list).toEqual([]);
+      expect(yield* cubes.list).toEqual([]);
 
-      const created = yield* sandboxes.create({
+      const created = yield* cubes.create({
         repositoryUrl: "https://github.com/example/app.git",
       });
       expect(spareName).toBe(`t3-spare-${created.id}`);
-      expect(docker.containers.get(`t3-sandbox-${created.id}`)?.status).toBe("running");
+      expect(docker.containers.get(`t3-cube-${created.id}`)?.status).toBe("running");
       expect(created.state).toBe("running");
 
       // The claim leaves a new spare in its place.
-      yield* refillSpare(sandboxes);
+      yield* refillSpare(cubes);
       const spares = [...docker.containers.keys()].filter((name) => name.startsWith("t3-spare-"));
       expect(spares).toHaveLength(1);
       expect(docker.containers.get(spares[0]!)?.status).toBe("paused");
-      expect((yield* sandboxes.list).map((sandbox) => sandbox.id)).toEqual([created.id]);
+      expect((yield* cubes.list).map((cube) => cube.id)).toEqual([created.id]);
     }).pipe(Effect.provide(serviceLayer(docker, true, () => true, true)));
   });
 
-  it.effect("replaces a spare that fails once claimed with a fresh sandbox", () => {
+  it.effect("replaces a spare that fails once claimed with a fresh cube", () => {
     const docker = fakeDocker();
     return Effect.gen(function* () {
-      const sandboxes = yield* SandboxService.SandboxService;
-      yield* refillSpare(sandboxes);
+      const cubes = yield* CubeService.CubeService;
+      yield* refillSpare(cubes);
       const [spareName] = [...docker.containers.keys()];
       const spareId = spareName!.replace("t3-spare-", "");
-      docker.failingClones.add(`t3-sandbox-${spareId}`);
+      docker.failingClones.add(`t3-cube-${spareId}`);
 
-      const created = yield* sandboxes.create({
+      const created = yield* cubes.create({
         repositoryUrl: "https://github.com/example/app.git",
       });
       expect(created.id).not.toBe(spareId);
-      expect(docker.containers.has(`t3-sandbox-${spareId}`)).toBe(false);
-      expect(docker.containers.get(`t3-sandbox-${created.id}`)?.status).toBe("running");
+      expect(docker.containers.has(`t3-cube-${spareId}`)).toBe(false);
+      expect(docker.containers.get(`t3-cube-${created.id}`)?.status).toBe("running");
     }).pipe(Effect.provide(serviceLayer(docker, true, () => true, true)));
   });
 
-  it.effect(
-    "replaces the spare when sandbox settings change, and deletes it when turned off",
-    () => {
-      const docker = fakeDocker();
-      return Effect.gen(function* () {
-        const sandboxes = yield* SandboxService.SandboxService;
-        const settings = yield* ServerSettings.ServerSettingsService;
-        const spares = () => [...docker.containers.keys()];
-        yield* refillSpare(sandboxes);
-        const [first] = spares();
-        yield* refillSpare(sandboxes);
-        expect(spares()).toEqual([first]);
-
-        yield* settings.updateSettings({ sandboxSize: "medium" });
-        yield* refillSpare(sandboxes);
-        expect(spares()).toHaveLength(1);
-        expect(spares()[0]).not.toBe(first);
-
-        yield* settings.updateSettings({ sandboxKeepReady: false });
-        yield* refillSpare(sandboxes);
-        expect(spares()).toEqual([]);
-        expect(docker.volumes.size).toBe(0);
-      }).pipe(Effect.provide(serviceLayer(docker, true, () => true, true)));
-    },
-  );
-
-  it.effect(
-    "starts sandboxes with the host's variables, keeping secrets off the command line",
-    () => {
-      const docker = fakeDocker();
-      return Effect.gen(function* () {
-        const sandboxes = yield* SandboxService.SandboxService;
-        yield* sandboxes.create({});
-        const runIndex = docker.calls.findIndex((args) => args[0] === "run");
-        const run = docker.calls[runIndex]!;
-        expect(run).toEqual(
-          expect.arrayContaining([
-            "--env",
-            "CLAUDE_CODE_OAUTH_TOKEN",
-            "--env",
-            "GIT_AUTHOR_NAME=Sandbox",
-          ]),
-        );
-        expect(run.join(" ")).not.toContain("sk-ant-oat-secret");
-        expect(docker.envs[runIndex]).toEqual({ CLAUDE_CODE_OAUTH_TOKEN: "sk-ant-oat-secret" });
-      }).pipe(Effect.provide(serviceLayer(docker)));
-    },
-  );
-
-  it.effect("stops, restarts, pairs with, and removes a sandbox with its volume", () => {
+  it.effect("replaces the spare when cube settings change, and deletes it when turned off", () => {
     const docker = fakeDocker();
     return Effect.gen(function* () {
-      const sandboxes = yield* SandboxService.SandboxService;
-      const { id } = yield* sandboxes.create({});
-      const stopped = yield* sandboxes.stop({ id });
+      const cubes = yield* CubeService.CubeService;
+      const settings = yield* ServerSettings.ServerSettingsService;
+      const spares = () => [...docker.containers.keys()];
+      yield* refillSpare(cubes);
+      const [first] = spares();
+      yield* refillSpare(cubes);
+      expect(spares()).toEqual([first]);
+
+      yield* settings.updateSettings({ cubeSize: "medium" });
+      yield* refillSpare(cubes);
+      expect(spares()).toHaveLength(1);
+      expect(spares()[0]).not.toBe(first);
+
+      yield* settings.updateSettings({ cubeKeepReady: false });
+      yield* refillSpare(cubes);
+      expect(spares()).toEqual([]);
+      expect(docker.volumes.size).toBe(0);
+    }).pipe(Effect.provide(serviceLayer(docker, true, () => true, true)));
+  });
+
+  it.effect("starts cubes with the host's variables, keeping secrets off the command line", () => {
+    const docker = fakeDocker();
+    return Effect.gen(function* () {
+      const cubes = yield* CubeService.CubeService;
+      yield* cubes.create({});
+      const runIndex = docker.calls.findIndex((args) => args[0] === "run");
+      const run = docker.calls[runIndex]!;
+      expect(run).toEqual(
+        expect.arrayContaining([
+          "--env",
+          "CLAUDE_CODE_OAUTH_TOKEN",
+          "--env",
+          "GIT_AUTHOR_NAME=Cube",
+        ]),
+      );
+      expect(run.join(" ")).not.toContain("sk-ant-oat-secret");
+      expect(docker.envs[runIndex]).toEqual({ CLAUDE_CODE_OAUTH_TOKEN: "sk-ant-oat-secret" });
+    }).pipe(Effect.provide(serviceLayer(docker)));
+  });
+
+  it.effect("stops, restarts, pairs with, and removes a cube with its volume", () => {
+    const docker = fakeDocker();
+    return Effect.gen(function* () {
+      const cubes = yield* CubeService.CubeService;
+      const { id } = yield* cubes.create({});
+      const stopped = yield* cubes.stop({ id });
       expect(stopped).toMatchObject({ state: "stopped", httpBaseUrl: null });
       expect(stopped.environmentId).not.toBeNull();
-      const paired = yield* sandboxes.pair({ id }).pipe(Effect.flip);
-      expect(paired._tag).toBe("SandboxNotRunningError");
-      expect((yield* sandboxes.start({ id })).state).toBe("running");
-      expect(yield* sandboxes.pair({ id })).toEqual({
+      const paired = yield* cubes.pair({ id }).pipe(Effect.flip);
+      expect(paired._tag).toBe("CubeNotRunningError");
+      expect((yield* cubes.start({ id })).state).toBe("running");
+      expect(yield* cubes.pair({ id })).toEqual({
         httpBaseUrl: "http://100.64.0.7:49999",
         credential: "PAIR1234",
         expiresAt: "2026-10-03T01:00:00Z",
       });
-      const { environmentId } = (yield* sandboxes.list)[0]!;
-      yield* sandboxes.remove({ id });
-      expect(yield* sandboxes.list).toEqual([]);
+      const { environmentId } = (yield* cubes.list)[0]!;
+      yield* cubes.remove({ id });
+      expect(yield* cubes.list).toEqual([]);
       expect(docker.volumes.size).toBe(0);
-      // Every client learns the sandbox is gone, so none keeps retrying it.
-      expect(yield* sandboxes.removedEnvironments).toEqual([environmentId]);
+      // Every client learns the cube is gone, so none keeps retrying it.
+      expect(yield* cubes.removedEnvironments).toEqual([environmentId]);
     }).pipe(Effect.provide(serviceLayer(docker)));
   });
 
-  it.effect("keeps managing Docker sandboxes after new ones move to Fly", () => {
+  it.effect("keeps managing Docker cubes after new ones move to Fly", () => {
     const docker = fakeDocker();
     return Effect.gen(function* () {
-      const sandboxes = yield* SandboxService.SandboxService;
+      const cubes = yield* CubeService.CubeService;
       const settings = yield* ServerSettings.ServerSettingsService;
-      const { id } = yield* sandboxes.create({});
-      yield* settings.updateSettings({ sandboxBackend: "fly" });
-      expect((yield* sandboxes.list).map((sandbox) => [sandbox.id, sandbox.backend])).toEqual([
-        [id, "docker"],
-      ]);
-      // Fly is selected but has no token yet, so new sandboxes cannot go anywhere.
-      const error = yield* sandboxes.create({}).pipe(Effect.flip);
-      expect(error._tag).toBe("SandboxUnavailableError");
-      yield* sandboxes.remove({ id });
-      expect(yield* sandboxes.list).toEqual([]);
+      const { id } = yield* cubes.create({});
+      yield* settings.updateSettings({ cubeBackend: "fly" });
+      expect((yield* cubes.list).map((cube) => [cube.id, cube.backend])).toEqual([[id, "docker"]]);
+      // Fly is selected but has no token yet, so new cubes cannot go anywhere.
+      const error = yield* cubes.create({}).pipe(Effect.flip);
+      expect(error._tag).toBe("CubeUnavailableError");
+      yield* cubes.remove({ id });
+      expect(yield* cubes.list).toEqual([]);
     }).pipe(Effect.provide(serviceLayer(docker)));
   });
 
-  it.effect("hides a running sandbox's address until its server answers", () => {
+  it.effect("hides a running cube's address until its server answers", () => {
     const docker = fakeDocker();
     let serving = false;
     const layer = serviceLayer(docker, true, () => serving);
     return Effect.gen(function* () {
-      const sandboxes = yield* SandboxService.SandboxService;
+      const cubes = yield* CubeService.CubeService;
       serving = true;
-      const { id, environmentId } = yield* sandboxes.create({});
+      const { id, environmentId } = yield* cubes.create({});
       serving = false;
-      const [booting] = yield* sandboxes.list;
+      const [booting] = yield* cubes.list;
       expect(booting).toMatchObject({ id, state: "running", httpBaseUrl: null, environmentId });
       serving = true;
-      expect((yield* sandboxes.list)[0]?.httpBaseUrl).toBe("http://100.64.0.7:49999");
+      expect((yield* cubes.list)[0]?.httpBaseUrl).toBe("http://100.64.0.7:49999");
     }).pipe(Effect.provide(layer));
   });
 
-  it.effect("deletes sandboxes stopped longer than the setting allows, and no others", () => {
+  it.effect("deletes cubes stopped longer than the setting allows, and no others", () => {
     const docker = fakeDocker();
     return Effect.gen(function* () {
-      const sandboxes = yield* SandboxService.SandboxService;
-      const old = yield* sandboxes.create({});
-      const recent = yield* sandboxes.create({});
-      const running = yield* sandboxes.create({});
+      const cubes = yield* CubeService.CubeService;
+      const old = yield* cubes.create({});
+      const recent = yield* cubes.create({});
+      const running = yield* cubes.create({});
       docker.stopAt("2026-10-01T00:00:00Z");
-      yield* sandboxes.stop({ id: old.id });
+      yield* cubes.stop({ id: old.id });
       docker.stopAt("2026-10-18T00:00:00Z");
-      yield* sandboxes.stop({ id: recent.id });
+      yield* cubes.stop({ id: recent.id });
       yield* TestClock.setTime(Date.parse("2026-10-20T00:00:00Z"));
 
-      expect(yield* sandboxes.pruneStopped).toEqual([old.id]);
-      expect((yield* sandboxes.list).map((sandbox) => sandbox.id).toSorted()).toEqual(
+      expect(yield* cubes.pruneStopped).toEqual([old.id]);
+      expect((yield* cubes.list).map((cube) => cube.id).toSorted()).toEqual(
         [recent.id, running.id].toSorted(),
       );
       expect(running.state).toBe("running");
     }).pipe(Effect.provide(serviceLayer(docker)));
   });
 
-  it.effect("reports unknown sandboxes and ignores containers it did not create", () => {
+  it.effect("reports unknown cubes and ignores containers it did not create", () => {
     const docker = fakeDocker();
     docker.containers.set("someone-elses", { labels: {}, image: "nginx", status: "running" });
     return Effect.gen(function* () {
-      const sandboxes = yield* SandboxService.SandboxService;
-      const error = yield* sandboxes.stop({ id: "aaaaaaaaaaaa" }).pipe(Effect.flip);
-      expect(error._tag).toBe("SandboxNotFoundError");
-      expect(yield* sandboxes.list).toEqual([]);
+      const cubes = yield* CubeService.CubeService;
+      const error = yield* cubes.stop({ id: "aaaaaaaaaaaa" }).pipe(Effect.flip);
+      expect(error._tag).toBe("CubeNotFoundError");
+      expect(yield* cubes.list).toEqual([]);
     }).pipe(Effect.provide(serviceLayer(docker)));
   });
 
-  it.effect("refuses to touch Docker while sandboxes are turned off", () => {
+  it.effect("refuses to touch Docker while cubes are turned off", () => {
     const docker = fakeDocker();
     return Effect.gen(function* () {
-      const sandboxes = yield* SandboxService.SandboxService;
-      const error = yield* sandboxes.list.pipe(Effect.flip);
-      expect(error._tag).toBe("SandboxUnavailableError");
+      const cubes = yield* CubeService.CubeService;
+      const error = yield* cubes.list.pipe(Effect.flip);
+      expect(error._tag).toBe("CubeUnavailableError");
       expect(docker.calls).toEqual([]);
     }).pipe(Effect.provide(serviceLayer(docker, false)));
   });

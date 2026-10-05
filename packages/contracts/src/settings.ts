@@ -998,25 +998,25 @@ export const BitbucketSettings = Schema.Struct({
 });
 export type BitbucketSettings = typeof BitbucketSettings.Type;
 
-/** Where new sandboxes run: this machine's Docker, or Fly Machines. */
-export const SandboxBackend = Schema.Literals(["docker", "fly"]);
-export type SandboxBackend = typeof SandboxBackend.Type;
+/** Where new cubes run: this machine's Docker, or Fly Machines. */
+export const CubeBackend = Schema.Literals(["docker", "fly"]);
+export type CubeBackend = typeof CubeBackend.Type;
 
 /**
- * How much machine a new sandbox gets. Small is 2 shared vCPUs and 2 GB;
+ * How much machine a new cube gets. Small is 2 shared vCPUs and 2 GB;
  * medium is 4 shared vCPUs and 8 GB; large is 4 dedicated vCPUs and 8 GB
  * where the backend has dedicated CPUs (Docker treats it as 8 CPUs, 16 GB).
  */
-export const SandboxSize = Schema.Literals(["small", "medium", "large"]);
-export type SandboxSize = typeof SandboxSize.Type;
+export const CubeSize = Schema.Literals(["small", "medium", "large"]);
+export type CubeSize = typeof CubeSize.Type;
 
-export const SandboxFlySettings = Schema.Struct({
+export const CubeFlySettings = Schema.Struct({
   /** Kept in the secret store; clients only learn whether one is set. */
   apiToken: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
   organization: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
   region: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
 });
-export type SandboxFlySettings = typeof SandboxFlySettings.Type;
+export type CubeFlySettings = typeof CubeFlySettings.Type;
 
 export const ObservabilitySettings = Schema.Struct({
   otlpTracesUrl: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
@@ -1292,52 +1292,50 @@ export const ServerSettings = Schema.Struct({
   deviceOnboardingCompleted: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   deviceHosts: SshDeviceHostConfigs.pipe(Schema.withDecodingDefault(Effect.succeed([]))),
   /**
-   * Whether this server may create sandboxes. Off by default: with the Docker
+   * Whether this server may create cubes. Off by default: with the Docker
    * backend, access to the Docker daemon is effectively root on the host.
    */
-  enableSandboxes: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  enableCubes: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   /**
-   * Image each new sandbox runs; it must start a T3 server on port 7777. Fly
+   * Image each new cube runs; it must start a T3 server on port 7777. Fly
    * pulls it, so there it must be a registry reference.
    */
-  sandboxImage: TrimmedNonEmptyString.pipe(
-    Schema.withDecodingDefault(Effect.succeed("t3code-sandbox:latest")),
+  cubeImage: TrimmedNonEmptyString.pipe(
+    Schema.withDecodingDefault(Effect.succeed("t3code-cube:latest")),
   ),
   /**
-   * Host address sandboxes publish their servers on, which clients connect to
+   * Host address cubes publish their servers on, which clients connect to
    * directly. Loopback serves clients on this machine only; a LAN or tailnet
    * address serves other devices on that network.
    */
-  sandboxPublishHost: TrimmedNonEmptyString.pipe(
+  cubePublishHost: TrimmedNonEmptyString.pipe(
     Schema.withDecodingDefault(Effect.succeed("127.0.0.1")),
   ),
   /**
-   * Variables every new sandbox starts with, such as an agent's login token
+   * Variables every new cube starts with, such as an agent's login token
    * (`CLAUDE_CODE_OAUTH_TOKEN` from `claude setup-token`). Sensitive values
    * live in the secret store, as provider instance variables do.
    */
-  sandboxEnvironment: ProviderInstanceEnvironment.pipe(
-    Schema.withDecodingDefault(Effect.succeed([])),
-  ),
-  sandboxBackend: SandboxBackend.pipe(Schema.withDecodingDefault(Effect.succeed("docker"))),
-  sandboxSize: SandboxSize.pipe(Schema.withDecodingDefault(Effect.succeed("small"))),
-  sandboxFly: SandboxFlySettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
+  cubeEnvironment: ProviderInstanceEnvironment.pipe(Schema.withDecodingDefault(Effect.succeed([]))),
+  cubeBackend: CubeBackend.pipe(Schema.withDecodingDefault(Effect.succeed("docker"))),
+  cubeSize: CubeSize.pipe(Schema.withDecodingDefault(Effect.succeed("small"))),
+  cubeFly: CubeFlySettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
   /**
-   * Minutes a sandbox may sit with no agent working (sending a message starts
-   * one) before it sleeps; 0 keeps it running. Applies to sandboxes created
+   * Minutes a cube may sit with no agent working (sending a message starts
+   * one) before it sleeps; 0 keeps it running. Applies to cubes created
    * afterwards.
    */
-  sandboxSleepAfterMinutes: NonNegativeInt.pipe(Schema.withDecodingDefault(Effect.succeed(20))),
+  cubeSleepAfterMinutes: NonNegativeInt.pipe(Schema.withDecodingDefault(Effect.succeed(20))),
   /**
-   * Days a sandbox may stay stopped before the host deletes it, files and
-   * unpushed changes included; 0 keeps stopped sandboxes.
+   * Days a cube may stay stopped before the host deletes it, files and
+   * unpushed changes included; 0 keeps stopped cubes.
    */
-  sandboxDeleteAfterDays: NonNegativeInt.pipe(Schema.withDecodingDefault(Effect.succeed(14))),
+  cubeDeleteAfterDays: NonNegativeInt.pipe(Schema.withDecodingDefault(Effect.succeed(14))),
   /**
-   * Keeps one booted sandbox asleep and waiting, so a new one starts in
-   * seconds. It costs what any sleeping sandbox does.
+   * Keeps one booted cube asleep and waiting, so a new one starts in
+   * seconds. It costs what any sleeping cube does.
    */
-  sandboxKeepReady: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  cubeKeepReady: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   sidebarAutoSettleAfterDays: Schema.NullOr(SidebarAutoSettleAfterDays).pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_SIDEBAR_AUTO_SETTLE_AFTER_DAYS)),
   ),
@@ -1699,16 +1697,16 @@ export const ServerSettingsPatch = Schema.Struct({
   ),
   enableAgentDeviceAccess: Schema.optionalKey(Schema.Boolean),
   enableDeviceSupport: Schema.optionalKey(Schema.Boolean),
-  enableSandboxes: Schema.optionalKey(Schema.Boolean),
-  sandboxImage: Schema.optionalKey(TrimmedNonEmptyString),
-  sandboxPublishHost: Schema.optionalKey(TrimmedNonEmptyString),
-  sandboxEnvironment: Schema.optionalKey(ProviderInstanceEnvironment),
-  sandboxBackend: Schema.optionalKey(SandboxBackend),
-  sandboxSize: Schema.optionalKey(SandboxSize),
-  sandboxSleepAfterMinutes: Schema.optionalKey(NonNegativeInt),
-  sandboxDeleteAfterDays: Schema.optionalKey(NonNegativeInt),
-  sandboxKeepReady: Schema.optionalKey(Schema.Boolean),
-  sandboxFly: Schema.optionalKey(
+  enableCubes: Schema.optionalKey(Schema.Boolean),
+  cubeImage: Schema.optionalKey(TrimmedNonEmptyString),
+  cubePublishHost: Schema.optionalKey(TrimmedNonEmptyString),
+  cubeEnvironment: Schema.optionalKey(ProviderInstanceEnvironment),
+  cubeBackend: Schema.optionalKey(CubeBackend),
+  cubeSize: Schema.optionalKey(CubeSize),
+  cubeSleepAfterMinutes: Schema.optionalKey(NonNegativeInt),
+  cubeDeleteAfterDays: Schema.optionalKey(NonNegativeInt),
+  cubeKeepReady: Schema.optionalKey(Schema.Boolean),
+  cubeFly: Schema.optionalKey(
     Schema.Struct({
       apiToken: Schema.optionalKey(TrimmedString),
       organization: Schema.optionalKey(TrimmedString),

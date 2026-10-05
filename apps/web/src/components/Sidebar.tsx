@@ -171,7 +171,7 @@ import { cn } from "~/lib/utils";
 import { EnvironmentMachineIcon } from "./EnvironmentMachineIcon";
 import { ProjectEnvironmentBadge } from "./ProjectEnvironmentBadge";
 import { buildDraftActionMenuItems, buildThreadActionMenuItems } from "./threadActionMenu.logic";
-import { readThreadSandboxMenuState, useSandboxActions } from "../hooks/useSandboxActions";
+import { readThreadCubeMenuState, useCubeActions } from "../hooks/useCubeActions";
 import {
   animateSidebarLayoutChanges,
   applySidebarThreadDrop,
@@ -2350,7 +2350,7 @@ export default function Sidebar() {
     archiveThread,
     deleteThread,
   } = useThreadActions();
-  const runSandboxAction = useSandboxActions();
+  const runCubeAction = useCubeActions();
   const updateThreadMetadata = useAtomCommand(threadEnvironment.updateMetadata, {
     reportFailure: false,
   });
@@ -4492,7 +4492,7 @@ export default function Sidebar() {
                 titleRegeneration: supportsTitleRegeneration,
               },
               snoozePresets,
-              sandbox: readThreadSandboxMenuState(thread.environmentId),
+              cube: readThreadCubeMenuState(thread.environmentId),
             }),
             position,
           ),
@@ -4507,10 +4507,10 @@ export default function Sidebar() {
           return;
         }
         switch (clicked.value) {
-          case "sandbox:start":
-          case "sandbox:stop":
-          case "sandbox:delete":
-            await runSandboxAction(thread.environmentId, clicked.value);
+          case "cube:start":
+          case "cube:stop":
+          case "cube:delete":
+            await runCubeAction(thread.environmentId, clicked.value);
             return;
           case "filter-by-project":
             // This item is the only scope control here, so picking the
@@ -4706,7 +4706,7 @@ export default function Sidebar() {
       openProjectSettings,
       projectScopeKey,
       projectByKey,
-      runSandboxAction,
+      runCubeAction,
       serverConfigs,
       setProjectScopeKey,
       setThreadAutoSettle,

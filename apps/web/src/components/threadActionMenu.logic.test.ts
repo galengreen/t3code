@@ -171,25 +171,23 @@ describe("buildThreadActionMenuItems", () => {
     expect(archiveItem?.disabled).toBe(true);
   });
 
-  it("offers waking a stopped sandbox and stopping a running one, with delete beside", () => {
+  it("offers waking a stopped cube and stopping a running one, with delete beside", () => {
     const docker = { wakesOnRequest: false };
-    expect(allIds({ ...baseState, sandbox: { ...docker, state: "stopped" } })).toEqual(
-      expect.arrayContaining(["sandbox", "sandbox:start", "sandbox:delete"]),
+    expect(allIds({ ...baseState, cube: { ...docker, state: "stopped" } })).toEqual(
+      expect.arrayContaining(["cube", "cube:start", "cube:delete"]),
     );
-    const running = allIds({ ...baseState, sandbox: { ...docker, state: "running" } });
-    expect(running).toContain("sandbox:stop");
-    expect(running).not.toContain("sandbox:start");
-    expect(allIds(baseState)).not.toContain("sandbox");
+    const running = allIds({ ...baseState, cube: { ...docker, state: "running" } });
+    expect(running).toContain("cube:stop");
+    expect(running).not.toContain("cube:start");
+    expect(allIds(baseState)).not.toContain("cube");
   });
 
-  it("offers putting a Fly sandbox to sleep, and no Start, since opening it wakes it", () => {
+  it("offers putting a Fly cube to sleep, and no Start, since opening it wakes it", () => {
     const fly = { wakesOnRequest: true };
-    const asleep = allIds({ ...baseState, sandbox: { ...fly, state: "stopped" } });
-    expect(asleep).not.toContain("sandbox:start");
-    expect(asleep).toContain("sandbox:delete");
-    expect(allIds({ ...baseState, sandbox: { ...fly, state: "running" } })).toContain(
-      "sandbox:stop",
-    );
+    const asleep = allIds({ ...baseState, cube: { ...fly, state: "stopped" } });
+    expect(asleep).not.toContain("cube:start");
+    expect(asleep).toContain("cube:delete");
+    expect(allIds({ ...baseState, cube: { ...fly, state: "running" } })).toContain("cube:stop");
   });
 });
 

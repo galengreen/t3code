@@ -3,17 +3,17 @@
 # server. Returns at once and finishes in the background, so the host is not
 # held for the length of a clone; clients see the project when it is done.
 # Output goes to ~/.t3/clone-<name>.log. While it runs, its process id is in
-# ~/.t3/preparing.pid, which keeps the sandbox from sleeping mid-clone.
+# ~/.t3/preparing.pid, which keeps the cube from sleeping mid-clone.
 #
-# Usage: t3-sandbox-clone <git url>
+# Usage: t3-cube-clone <git url>
 set -eu
 url="$1"
 name="$(basename "$url" .git)"
 dest="$HOME/work/$name"
 
-if [ "${T3_SANDBOX_CLONE_DETACHED:-}" != 1 ]; then
+if [ "${T3_CUBE_CLONE_DETACHED:-}" != 1 ]; then
   mkdir -p "$HOME/work" "$HOME/.t3"
-  T3_SANDBOX_CLONE_DETACHED=1 setsid "$0" "$url" \
+  T3_CUBE_CLONE_DETACHED=1 setsid "$0" "$url" \
     > "$HOME/.t3/clone-$name.log" 2>&1 < /dev/null &
   exit 0
 fi

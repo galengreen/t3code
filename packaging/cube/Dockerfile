@@ -1,13 +1,13 @@
-# The reference sandbox image: a T3 server, Claude Code, and common
-# development tools, run by a host's sandboxes. The contract it meets is in
-# apps/server/src/sandbox/SandboxService.ts.
+# The reference cube image: a T3 server, Claude Code, and common
+# development tools, run by a host's cubes. The contract it meets is in
+# apps/server/src/cube/CubeService.ts.
 #
 # Kept small, since a cloud host pulls it onto each new machine before its
 # first boot. Everything is installed outside /home/dev, which holds only the
-# sandbox's own files, so a new Docker sandbox's home volume starts empty.
+# cube's own files, so a new Docker cube's home volume starts empty.
 #
-#   docker build -t t3code-sandbox packaging/sandbox
-#   docker build --build-arg T3CODE_VERSION=0.0.45 -t t3code-sandbox packaging/sandbox
+#   docker build -t t3code-cube packaging/cube
+#   docker build --build-arg T3CODE_VERSION=0.0.45 -t t3code-cube packaging/cube
 FROM debian:bookworm-slim
 
 ARG TARGETARCH
@@ -44,15 +44,15 @@ RUN curl -fsSL https://t3.codes/install.sh \
  && curl -fsSL https://claude.ai/install.sh | HOME=/opt/claude bash \
  && ln -s "$(readlink -f /opt/claude/.local/bin/claude)" /usr/local/bin/claude \
  && chmod -R a+rX /opt/t3 /opt/claude
-# The image is the update channel; a sandbox should not update itself.
+# The image is the update channel; a cube should not update itself.
 ENV DISABLE_AUTOUPDATER=1
 
 RUN useradd -m -s /bin/bash dev \
  && echo 'dev ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/dev
-COPY --chmod=755 entrypoint.sh /usr/local/bin/t3-sandbox-entrypoint
-COPY --chmod=755 clone.sh /usr/local/bin/t3-sandbox-clone
+COPY --chmod=755 entrypoint.sh /usr/local/bin/t3-cube-entrypoint
+COPY --chmod=755 clone.sh /usr/local/bin/t3-cube-clone
 
 USER dev
 WORKDIR /home/dev
 EXPOSE 7777
-ENTRYPOINT ["/usr/local/bin/t3-sandbox-entrypoint"]
+ENTRYPOINT ["/usr/local/bin/t3-cube-entrypoint"]

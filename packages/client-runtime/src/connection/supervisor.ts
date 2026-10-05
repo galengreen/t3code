@@ -111,7 +111,7 @@ function exitUnlessInterrupted<A, E, R>(
 export interface EnvironmentSupervisorOptions {
   readonly initiallyDesired?: boolean;
   /**
-   * For environments that sleep when unused, such as sandboxes, where every
+   * For environments that sleep when unused, such as cubes, where every
    * connection attempt wakes the machine. `connect` then means "needed now":
    * it keeps trying for a while and then goes quiet, instead of retrying
    * forever, and a dropped connection is left closed. The exception is an

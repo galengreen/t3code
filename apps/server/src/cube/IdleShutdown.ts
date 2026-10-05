@@ -1,18 +1,18 @@
 /**
- * Lets a sandbox's server put its machine to sleep when its agent is idle,
- * so sandboxes stop billing on their own, even while the host that made them
+ * Lets a cube's server put its machine to sleep when its agent is idle,
+ * so cubes stop billing on their own, even while the host that made them
  * is offline. On a Fly machine it asks Fly to suspend the machine, which keeps
  * memory and wakes in about a second; elsewhere, or if Fly refuses (machines
  * over 2 GB cannot suspend), the server exits, and the machine ends with it.
  *
- * Off unless `T3CODE_SLEEP_WHEN_IDLE_MINUTES` is set, which only sandbox hosts
+ * Off unless `T3CODE_SLEEP_WHEN_IDLE_MINUTES` is set, which only cube hosts
  * do. Idle means no agent work for that long: sending a message starts a run,
  * and the agent working keeps it going. A repository still being cloned keeps
- * it awake too. Clients being connected, or browsing the sandbox, do not
+ * it awake too. Clients being connected, or browsing the cube, do not
  * count. Waking (boot, resume) only earns a short grace, enough to send a
- * message, so a stray request does not keep a sandbox up for the full window.
+ * message, so a stray request does not keep a cube up for the full window.
  */
-import { SandboxUnavailableError } from "@t3tools/contracts";
+import { CubeUnavailableError } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
 import * as Clock from "effect/Clock";
 import * as Config from "effect/Config";
@@ -45,8 +45,8 @@ const WAKE_GAP = Duration.seconds(45);
 const WAKE_GRACE = Duration.minutes(2);
 
 /**
- * `t3-sandbox-clone` writes its process id here while it clones, so a
- * sandbox does not sleep mid-clone. Relative to the T3 home.
+ * `t3-cube-clone` writes its process id here while it clones, so a
+ * cube does not sleep mid-clone. Relative to the T3 home.
  */
 export const PREPARING_PID_FILE = "preparing.pid";
 
@@ -59,9 +59,9 @@ export class IdleShutdown extends Context.Service<
      * repository is still being prepared. Returns first and sleeps a moment
      * later, so the answer reaches the client that asked.
      */
-    readonly sleepNow: Effect.Effect<void, SandboxUnavailableError>;
+    readonly sleepNow: Effect.Effect<void, CubeUnavailableError>;
   }
->()("t3/sandbox/IdleShutdown") {}
+>()("t3/cube/IdleShutdown") {}
 
 const toMillis = (value: DateTime.Utc | null | undefined) =>
   value === null || value === undefined ? 0 : DateTime.toEpochMillis(value);
@@ -157,18 +157,18 @@ export const make = (options: { readonly sleep: Effect.Effect<void> }) =>
 
     const sleepNow = Effect.gen(function* () {
       if (!enabled) {
-        return yield* new SandboxUnavailableError({ reason: "This server does not sleep." });
+        return yield* new CubeUnavailableError({ reason: "This server does not sleep." });
       }
       const current = yield* work.pipe(
         Effect.mapError(
-          () => new SandboxUnavailableError({ reason: "Could not check whether it is busy." }),
+          () => new CubeUnavailableError({ reason: "Could not check whether it is busy." }),
         ),
       );
       if (current.running) {
-        return yield* new SandboxUnavailableError({ reason: "The agent is still working." });
+        return yield* new CubeUnavailableError({ reason: "The agent is still working." });
       }
       if (current.preparing) {
-        return yield* new SandboxUnavailableError({
+        return yield* new CubeUnavailableError({
           reason: "The repository is still being prepared.",
         });
       }
@@ -185,7 +185,7 @@ export const make = (options: { readonly sleep: Effect.Effect<void> }) =>
 /**
  * Asks the Machines API socket every Fly machine has, which needs no token,
  * to suspend this machine. Succeeds with whether Fly accepted. The socket is
- * root's, so the sandbox image opens it to the server's user.
+ * root's, so the cube image opens it to the server's user.
  */
 export const suspendFlyMachine = (app: string, machine: string, socketPath = "/.fly/api") => {
   // Node's agents honour `socketPath` as a request does, though the agent

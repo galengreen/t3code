@@ -299,7 +299,7 @@ import {
 import { cn, randomUUID } from "~/lib/utils";
 import { COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS } from "~/workspaceTitlebar";
 import { stackedThreadToast, toastManager } from "./ui/toast";
-import { useSandboxDraftLaunch } from "./chat/useSandboxDraftLaunch";
+import { useCubeDraftLaunch } from "./chat/useCubeDraftLaunch";
 import {
   decodeProjectScriptKeybindingRule,
   keybindingValueForCommand,
@@ -423,13 +423,13 @@ import { ChatComposer, type ChatComposerHandle } from "./chat/ChatComposer";
 import { createPageScrollController, type PageScrollKey } from "./chat/pageScrollController";
 import { isTimelineScrollTarget } from "./chat/timelineScrollTarget";
 import { DraftHeroHeadline } from "./chat/DraftHeroHeadline";
-import { SandboxLaunchCard } from "./chat/SandboxLaunchCard";
+import { CubeLaunchCard } from "./chat/CubeLaunchCard";
 import {
-  changeSandbox,
-  usePendingSandboxChange,
-  useSandboxEnvironmentIds,
-  useSandboxForEnvironment,
-} from "../state/sandbox";
+  changeCube,
+  usePendingCubeChange,
+  useCubeEnvironmentIds,
+  useCubeForEnvironment,
+} from "../state/cube";
 import { ExpandedImageDialog } from "./chat/ExpandedImageDialog";
 import { PullRequestThreadDialog } from "./PullRequestThreadDialog";
 import type { AssistantCitationRequest } from "./chat/AssistantCitationSource";
@@ -2057,30 +2057,30 @@ export default function ChatView(props: ChatViewProps) {
     [draftThread, fallbackDraftProject, settings, threadId],
   );
   const isServerThread = serverThread !== null;
-  // Opening a thread whose Docker sandbox is stopped starts it through its
-  // host. (A Fly sandbox wakes when its thread connects; see below.) Only the
-  // state found on arrival counts: a sandbox the user stops while reading the
+  // Opening a thread whose Docker cube is stopped starts it through its
+  // host. (A Fly cube wakes when its thread connects; see below.) Only the
+  // state found on arrival counts: a cube the user stops while reading the
   // thread stays stopped, and a failed start is not retried.
-  const activeSandbox = useSandboxForEnvironment(isServerThread ? environmentId : null);
-  const wakeSandbox = useAtomCommand(changeSandbox, { label: "wake sandbox" });
-  const activeSandboxPendingChange = usePendingSandboxChange(activeSandbox?.sandbox.id ?? null);
-  const wakeActiveSandbox = useCallback(() => {
-    if (!activeSandbox) return;
-    void wakeSandbox({
-      hostEnvironmentId: activeSandbox.hostEnvironmentId,
-      sandbox: activeSandbox.sandbox,
+  const activeCube = useCubeForEnvironment(isServerThread ? environmentId : null);
+  const wakeCube = useAtomCommand(changeCube, { label: "wake cube" });
+  const activeCubePendingChange = usePendingCubeChange(activeCube?.cube.id ?? null);
+  const wakeActiveCube = useCallback(() => {
+    if (!activeCube) return;
+    void wakeCube({
+      hostEnvironmentId: activeCube.hostEnvironmentId,
+      cube: activeCube.cube,
       change: "start",
     });
-  }, [activeSandbox, wakeSandbox]);
-  const arrivedSandboxIdRef = useRef<string | null>(null);
+  }, [activeCube, wakeCube]);
+  const arrivedCubeIdRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!activeSandbox || arrivedSandboxIdRef.current === activeSandbox.sandbox.id) return;
-    arrivedSandboxIdRef.current = activeSandbox.sandbox.id;
-    if (activeSandbox.sandbox.backend !== "docker" || activeSandbox.sandbox.state !== "stopped") {
+    if (!activeCube || arrivedCubeIdRef.current === activeCube.cube.id) return;
+    arrivedCubeIdRef.current = activeCube.cube.id;
+    if (activeCube.cube.backend !== "docker" || activeCube.cube.state !== "stopped") {
       return;
     }
-    wakeActiveSandbox();
-  }, [activeSandbox, wakeActiveSandbox]);
+    wakeActiveCube();
+  }, [activeCube, wakeActiveCube]);
   const activeThread = isServerThread ? serverThread : localDraftThread;
   const serverLatestRun = useMemo(
     () => (serverProjection === null ? null : deriveLatestThreadRun(serverProjection)),
@@ -2615,7 +2615,7 @@ export default function ChatView(props: ChatViewProps) {
   const activeEnvironment =
     activeThread == null ? null : (environmentById.get(activeThread.environmentId) ?? null);
   const activeEnvironmentConnectionPhase = activeEnvironment?.connection.phase ?? "available";
-  // An environment that connects when needed (a sandbox) is not connected
+  // An environment that connects when needed (a cube) is not connected
   // while idle; using it connects, so only a real failure makes it unavailable.
   const activeEnvironmentConnectsWhenNeeded =
     activeEnvironment?.entry.connectWhen === "needed" &&
@@ -2627,8 +2627,8 @@ export default function ChatView(props: ChatViewProps) {
     activeEnvironmentConnectionPhase !== "connected" &&
     !activeEnvironmentConnectsWhenNeeded;
   // Opening a thread is a need: connect its environment if it connects only
-  // when needed, which wakes a sleeping Fly sandbox. Once per arrival, so a
-  // sandbox put to sleep while the thread is open stays asleep until the user
+  // when needed, which wakes a sleeping Fly cube. Once per arrival, so a
+  // cube put to sleep while the thread is open stays asleep until the user
   // acts.
   const connectEnvironment = useAtomCommand(environmentCatalog.connect, { reportFailure: false });
   const arrivedOnDemandEnvironmentRef = useRef<EnvironmentId | null>(null);
@@ -2723,13 +2723,13 @@ export default function ChatView(props: ChatViewProps) {
       activeProject,
       environmentById.get(activeProject.environmentId)?.serverConfig?.scratchWorkspaceRoot ?? null,
     );
-  const sandboxEnvironmentIds = useSandboxEnvironmentIds();
+  const cubeEnvironmentIds = useCubeEnvironmentIds();
   const logicalProjectEnvironments = useMemo(() => {
     if (!activeProject) return [];
-    // A sandbox belongs to the thread that created it, so other drafts never
+    // A cube belongs to the thread that created it, so other drafts never
     // offer it as a place to run; only the one already in it shows it.
     const offersEnvironment = (id: EnvironmentId) =>
-      !sandboxEnvironmentIds.has(id) || id === environmentId;
+      !cubeEnvironmentIds.has(id) || id === environmentId;
     const envs: EnvironmentOption[] = [];
     const pushEnvironment = (environmentId: EnvironmentId, projectId: ProjectId | null) => {
       const environment = environmentById.get(environmentId) ?? null;
@@ -2789,7 +2789,7 @@ export default function ChatView(props: ChatViewProps) {
     projectGroupingSettings,
     primaryEnvironmentId,
     environmentById,
-    sandboxEnvironmentIds,
+    cubeEnvironmentIds,
     scratchWorkspaceRootFor,
   ]);
   const hasMultipleEnvironments = logicalProjectEnvironments.length > 1;
@@ -3008,28 +3008,25 @@ export default function ChatView(props: ChatViewProps) {
       ? null
       : clampFileAttachmentUploadBytes(advertisedFileAttachmentBytes);
   const envLocked = Boolean(activeThread && (activeMessageCount > 0 || activeRuntime !== null));
-  // A new thread can start in a fresh sandbox when the project has a remote to
+  // A new thread can start in a fresh cube when the project has a remote to
   // clone and a host can make one: this environment, or, for a draft that is
-  // already in a sandbox, the host that made it.
-  const draftSandbox = useSandboxForEnvironment(draftId ? environmentId : null);
-  const sandboxHostEnvironmentId = draftSandbox?.hostEnvironmentId ?? environmentId;
-  const sandboxHostEnabled =
-    draftSandbox === null
-      ? settings.enableSandboxes
-      : environmentById.get(sandboxHostEnvironmentId)?.serverConfig?.settings.enableSandboxes ===
-        true;
-  const sandboxRepositoryUrl = activeProject?.repositoryIdentity?.locator.remoteUrl ?? null;
-  const sandboxAvailable = Boolean(
-    draftId && !envLocked && sandboxHostEnabled && sandboxRepositoryUrl,
-  );
-  const sandboxUnavailableReason =
-    draftId && !envLocked && sandboxHostEnabled && !sandboxRepositoryUrl
+  // already in a cube, the host that made it.
+  const draftCube = useCubeForEnvironment(draftId ? environmentId : null);
+  const cubeHostEnvironmentId = draftCube?.hostEnvironmentId ?? environmentId;
+  const cubeHostEnabled =
+    draftCube === null
+      ? settings.enableCubes
+      : environmentById.get(cubeHostEnvironmentId)?.serverConfig?.settings.enableCubes === true;
+  const cubeRepositoryUrl = activeProject?.repositoryIdentity?.locator.remoteUrl ?? null;
+  const cubeAvailable = Boolean(draftId && !envLocked && cubeHostEnabled && cubeRepositoryUrl);
+  const cubeUnavailableReason =
+    draftId && !envLocked && cubeHostEnabled && !cubeRepositoryUrl
       ? "This project has no git remote to clone."
       : undefined;
-  const sandboxSelected = sandboxAvailable && draftThread?.environmentSelection === "sandbox";
-  const sandboxDraftLaunch = useSandboxDraftLaunch();
-  /** The sandbox environment a launched send is waiting to resume in. */
-  const pendingSandboxSendRef = useRef<EnvironmentId | null>(null);
+  const cubeSelected = cubeAvailable && draftThread?.environmentSelection === "cube";
+  const cubeDraftLaunch = useCubeDraftLaunch();
+  /** The cube environment a launched send is waiting to resume in. */
+  const pendingCubeSendRef = useRef<EnvironmentId | null>(null);
 
   const loadBalancingSettings = useClientSettings();
   const automaticEnvironment = Boolean(
@@ -3039,7 +3036,7 @@ export default function ChatView(props: ChatViewProps) {
     canAutoBalanceEnvironments &&
     loadBalancingSettings.loadBalancingEnabled &&
     draftThread?.environmentSelection !== "manual" &&
-    draftThread?.environmentSelection !== "sandbox" &&
+    draftThread?.environmentSelection !== "cube" &&
     (!composerHasAttachments || Boolean(draftThread?.loadBalancedEnvironmentId)) &&
     (!draftThread?.branch || draftThread.environmentSelection === "auto") &&
     !draftThread?.worktreePath,
@@ -4511,12 +4508,12 @@ export default function ChatView(props: ChatViewProps) {
     ],
   );
 
-  const onSandboxEnvironment = useCallback(() => {
+  const onCubeEnvironment = useCallback(() => {
     if (envLocked || !draftId) return;
     if (composerHasAttachments) {
       toastManager.add({
         type: "warning",
-        id: "sandbox-attachments",
+        id: "cube-attachments",
         title: "Keep attachments on this machine",
         description:
           "Remove attachments before starting in a cube, then attach them once it is running.",
@@ -4524,29 +4521,29 @@ export default function ChatView(props: ChatViewProps) {
       return;
     }
     setDraftThreadContext(draftId, {
-      environmentSelection: "sandbox",
+      environmentSelection: "cube",
       loadBalancedEnvironmentId: null,
       branch: null,
       worktreePath: null,
     });
   }, [composerHasAttachments, draftId, envLocked, setDraftThreadContext]);
-  const sandboxLabel = sandboxSelected ? "New cube" : undefined;
-  /** The message a sandbox launch will send, as it was when the user sent it. */
-  const [sandboxLaunchPrompt, setSandboxLaunchPrompt] = useState("");
-  /** Set while "Run on this machine" waits for the draft to leave sandbox mode. */
+  const cubeLabel = cubeSelected ? "New cube" : undefined;
+  /** The message a cube launch will send, as it was when the user sent it. */
+  const [cubeLaunchPrompt, setCubeLaunchPrompt] = useState("");
+  /** Set while "Run on this machine" waits for the draft to leave cube mode. */
   const pendingLocalSendRef = useRef(false);
 
-  // Creates the sandbox, then moves the draft into it; the queued message is
-  // sent from there once this view targets the sandbox's environment. The
+  // Creates the cube, then moves the draft into it; the queued message is
+  // sent from there once this view targets the cube's environment. The
   // composer keeps the message meanwhile, so nothing is lost on a reload.
-  const startSandboxLaunch = () => {
-    if (!sandboxSelected || !activeProject || !sandboxRepositoryUrl || !draftId) return;
-    if (sandboxDraftLaunch.launching) return;
-    setSandboxLaunchPrompt(promptRef.current);
-    void sandboxDraftLaunch
+  const startCubeLaunch = () => {
+    if (!cubeSelected || !activeProject || !cubeRepositoryUrl || !draftId) return;
+    if (cubeDraftLaunch.launching) return;
+    setCubeLaunchPrompt(promptRef.current);
+    void cubeDraftLaunch
       .launch({
-        hostEnvironmentId: sandboxHostEnvironmentId,
-        repositoryUrl: sandboxRepositoryUrl,
+        hostEnvironmentId: cubeHostEnvironmentId,
+        repositoryUrl: cubeRepositoryUrl,
         logicalProjectKey: deriveLogicalProjectKeyFromSettings(
           activeProject,
           projectGroupingSettings,
@@ -4560,13 +4557,13 @@ export default function ChatView(props: ChatViewProps) {
           environmentSelection: "manual",
           loadBalancedEnvironmentId: null,
         });
-        pendingSandboxSendRef.current = target.environmentId;
+        pendingCubeSendRef.current = target.environmentId;
       });
   };
 
-  const runSandboxLaunchHere = () => {
+  const runCubeLaunchHere = () => {
     if (!draftId) return;
-    sandboxDraftLaunch.finish();
+    cubeDraftLaunch.finish();
     pendingLocalSendRef.current = true;
     setDraftThreadContext(draftId, {
       environmentSelection: "manual",
@@ -7347,20 +7344,20 @@ export default function ChatView(props: ChatViewProps) {
   // A woken thread announces itself in the open view, not just the sidebar
   // pill. Dismissing marks the wake as seen (same acknowledgment as the
   // pill); sending a message clears it as a side effect of the send path.
-  // A sandbox that went to sleep while its thread is open says so, with the
+  // A cube that went to sleep while its thread is open says so, with the
   // way back, instead of leaving the thread looking disconnected.
-  const sandboxSleepBannerItem = useMemo<ComposerBannerStackItem | null>(() => {
-    // A Fly sandbox wakes when opened or sent to, so only Docker ones need it.
+  const cubeSleepBannerItem = useMemo<ComposerBannerStackItem | null>(() => {
+    // A Fly cube wakes when opened or sent to, so only Docker ones need it.
     if (
-      !activeSandbox ||
-      activeSandbox.sandbox.backend !== "docker" ||
-      activeSandbox.sandbox.state === "running"
+      !activeCube ||
+      activeCube.cube.backend !== "docker" ||
+      activeCube.cube.state === "running"
     ) {
       return null;
     }
-    const waking = activeSandboxPendingChange === "start";
+    const waking = activeCubePendingChange === "start";
     return {
-      id: `sandbox-asleep:${activeSandbox.sandbox.id}`,
+      id: `cube-asleep:${activeCube.cube.id}`,
       variant: "info",
       icon: <BoxIcon />,
       title: waking ? "Waking this thread's cube…" : "This thread's cube is asleep",
@@ -7368,12 +7365,12 @@ export default function ChatView(props: ChatViewProps) {
         ? "It stopped while idle and is starting again"
         : "It stopped while idle. Wake it to continue",
       actions: (
-        <Button size="xs" variant="ghost" disabled={waking} onClick={wakeActiveSandbox}>
+        <Button size="xs" variant="ghost" disabled={waking} onClick={wakeActiveCube}>
           {waking ? "Waking..." : "Wake"}
         </Button>
       ),
     };
-  }, [activeSandbox, activeSandboxPendingChange, wakeActiveSandbox]);
+  }, [activeCube, activeCubePendingChange, wakeActiveCube]);
   const wokeThreadBannerItem = useMemo<ComposerBannerStackItem | null>(() => {
     if (!activeThreadWokeVisible) {
       return null;
@@ -7584,7 +7581,7 @@ export default function ChatView(props: ChatViewProps) {
     const usageLimitsItems = usageLimitsBanner === null ? [] : [usageLimitsBanner];
     const projectCloneItems = [
       ...(projectCloneBannerItem === null ? [] : [projectCloneBannerItem]),
-      ...(sandboxSleepBannerItem === null ? [] : [sandboxSleepBannerItem]),
+      ...(cubeSleepBannerItem === null ? [] : [cubeSleepBannerItem]),
     ];
     if (!localCheckoutBranchMismatch || !showBranchMismatchBanner || !activeBranchMismatchKey) {
       return [
@@ -7661,7 +7658,7 @@ export default function ChatView(props: ChatViewProps) {
     parkedThreadBannerItem,
     projectCloneBannerItem,
     resumeCompactionBannerItem,
-    sandboxSleepBannerItem,
+    cubeSleepBannerItem,
     showBranchMismatchBanner,
     systemComposerBannerItems,
     usageLimitsBanner,
@@ -8574,8 +8571,8 @@ export default function ChatView(props: ChatViewProps) {
       notifyDirectAnnotationAttached();
       return;
     }
-    if (sandboxSelected) {
-      if (promptRef.current.trim().length > 0) startSandboxLaunch();
+    if (cubeSelected) {
+      if (promptRef.current.trim().length > 0) startCubeLaunch();
       return;
     }
     if (needsLoadBalancing) {
@@ -10289,25 +10286,25 @@ export default function ChatView(props: ChatViewProps) {
     return false;
   }
 
-  // Finishes a send that first created a sandbox, once the draft has moved
-  // into it and this render targets the sandbox's environment and project.
-  const resendInSandbox = useEffectEvent(() => {
-    void onSend().finally(sandboxDraftLaunch.finish);
+  // Finishes a send that first created a cube, once the draft has moved
+  // into it and this render targets the cube's environment and project.
+  const resendInCube = useEffectEvent(() => {
+    void onSend().finally(cubeDraftLaunch.finish);
   });
   useEffect(() => {
-    if (pendingSandboxSendRef.current !== environmentId) return;
-    pendingSandboxSendRef.current = null;
-    resendInSandbox();
+    if (pendingCubeSendRef.current !== environmentId) return;
+    pendingCubeSendRef.current = null;
+    resendInCube();
   }, [environmentId]);
-  // "Run on this machine" after a failed launch sends once sandbox mode is off.
+  // "Run on this machine" after a failed launch sends once cube mode is off.
   const sendLocally = useEffectEvent(() => {
     void onSend();
   });
   useEffect(() => {
-    if (sandboxSelected || !pendingLocalSendRef.current) return;
+    if (cubeSelected || !pendingLocalSendRef.current) return;
     pendingLocalSendRef.current = false;
     sendLocally();
-  }, [sandboxSelected]);
+  }, [cubeSelected]);
 
   const onImplementPlanInNewThread = useCallback(async () => {
     if (
@@ -11305,14 +11302,14 @@ export default function ChatView(props: ChatViewProps) {
                   data-chat-composer-stack="true"
                   className="group/composer-stack pointer-events-auto relative z-10 mx-auto w-full max-w-(--chat-content-max-width)"
                 >
-                  {sandboxDraftLaunch.state.phase !== "idle" ? (
-                    <SandboxLaunchCard
-                      state={sandboxDraftLaunch.state}
-                      prompt={sandboxLaunchPrompt}
+                  {cubeDraftLaunch.state.phase !== "idle" ? (
+                    <CubeLaunchCard
+                      state={cubeDraftLaunch.state}
+                      prompt={cubeLaunchPrompt}
                       repositoryName={activeProject?.title ?? null}
-                      onRetry={startSandboxLaunch}
-                      onRunHere={runSandboxLaunchHere}
-                      onEdit={sandboxDraftLaunch.finish}
+                      onRetry={startCubeLaunch}
+                      onRunHere={runCubeLaunchHere}
+                      onEdit={cubeDraftLaunch.finish}
                     />
                   ) : isDraftHeroState ? (
                     <div className="absolute inset-x-0 bottom-full">
@@ -11334,9 +11331,9 @@ export default function ChatView(props: ChatViewProps) {
                   ) : null}
                   <div
                     ref={draftHeroTransition.composerAnchorRef}
-                    // Hidden, not unmounted, while a sandbox launch holds the
+                    // Hidden, not unmounted, while a cube launch holds the
                     // message: the send that follows reads it from the composer.
-                    hidden={sandboxDraftLaunch.state.phase !== "idle"}
+                    hidden={cubeDraftLaunch.state.phase !== "idle"}
                     className="relative z-10"
                     style={
                       forceExpandedMobileComposer
@@ -11471,7 +11468,7 @@ export default function ChatView(props: ChatViewProps) {
                               activeProposedPlan={activeProposedPlan}
                               threadSyncPhase={
                                 // An idle environment that connects when needed (a
-                                // sleeping sandbox) is not syncing; it will when used.
+                                // sleeping cube) is not syncing; it will when used.
                                 activeEnvironmentUnavailable ||
                                 activeEnvironmentConnectionPhase === "available"
                                   ? null
@@ -11603,16 +11600,14 @@ export default function ChatView(props: ChatViewProps) {
                                   ? { onCheckoutPullRequestRequest: openPullRequestDialog }
                                   : {})}
                                 {...(hasMultipleEnvironments ||
-                                sandboxAvailable ||
-                                sandboxUnavailableReason
+                                cubeAvailable ||
+                                cubeUnavailableReason
                                   ? { onEnvironmentChange }
                                   : {})}
                                 autoEnvironmentLabel={autoEnvironmentLabel}
-                                sandboxLabel={sandboxLabel}
-                                onSandboxEnvironment={
-                                  sandboxAvailable ? onSandboxEnvironment : undefined
-                                }
-                                sandboxUnavailableReason={sandboxUnavailableReason}
+                                cubeLabel={cubeLabel}
+                                onCubeEnvironment={cubeAvailable ? onCubeEnvironment : undefined}
+                                cubeUnavailableReason={cubeUnavailableReason}
                                 onAutoEnvironment={
                                   draftId &&
                                   !envLocked &&

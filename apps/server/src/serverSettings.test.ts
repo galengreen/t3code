@@ -1566,7 +1566,7 @@ it.layer(NodeServices.layer)("server settings", (it) => {
       }).pipe(Effect.provide(makeServerSettingsLayerWithSecrets())),
   );
 
-  it.effect("keeps sensitive sandbox variables in the secret store until they are removed", () =>
+  it.effect("keeps sensitive cube variables in the secret store until they are removed", () =>
     Effect.gen(function* () {
       const serverSettings = yield* ServerSettingsModule.ServerSettingsService;
       const secrets = yield* ServerSecretStore.ServerSecretStore;
@@ -1574,12 +1574,12 @@ it.layer(NodeServices.layer)("server settings", (it) => {
       const fileSystem = yield* FileSystem.FileSystem;
 
       const saved = yield* serverSettings.updateSettings({
-        sandboxEnvironment: [
+        cubeEnvironment: [
           { name: "CLAUDE_CODE_OAUTH_TOKEN", value: "sk-ant-oat-secret", sensitive: true },
-          { name: "GIT_AUTHOR_NAME", value: "Sandbox", sensitive: false },
+          { name: "GIT_AUTHOR_NAME", value: "Cube", sensitive: false },
         ],
       });
-      assert.equal(saved.sandboxEnvironment[0]?.value, "sk-ant-oat-secret");
+      assert.equal(saved.cubeEnvironment[0]?.value, "sk-ant-oat-secret");
       assert.notInclude(
         yield* fileSystem.readFileString(serverConfig.settingsPath),
         "sk-ant-oat-secret",
@@ -1587,22 +1587,22 @@ it.layer(NodeServices.layer)("server settings", (it) => {
 
       // Clients see only that a value is stored, and echoing that back keeps it.
       const forClient = ServerSettingsModule.redactServerSettingsForClient(saved);
-      assert.deepEqual(forClient.sandboxEnvironment[0], {
+      assert.deepEqual(forClient.cubeEnvironment[0], {
         name: "CLAUDE_CODE_OAUTH_TOKEN",
         value: "",
         sensitive: true,
         valueRedacted: true,
       });
-      yield* serverSettings.updateSettings({ sandboxEnvironment: forClient.sandboxEnvironment });
+      yield* serverSettings.updateSettings({ cubeEnvironment: forClient.cubeEnvironment });
       assert.equal(
-        (yield* serverSettings.getSettings).sandboxEnvironment[0]?.value,
+        (yield* serverSettings.getSettings).cubeEnvironment[0]?.value,
         "sk-ant-oat-secret",
       );
 
-      const secretName = `sandbox-env-${Buffer.from("CLAUDE_CODE_OAUTH_TOKEN").toString("base64url")}`;
+      const secretName = `cube-env-${Buffer.from("CLAUDE_CODE_OAUTH_TOKEN").toString("base64url")}`;
       assert.isTrue(Option.isSome(yield* secrets.get(secretName)));
       yield* serverSettings.updateSettings({
-        sandboxEnvironment: forClient.sandboxEnvironment.slice(1),
+        cubeEnvironment: forClient.cubeEnvironment.slice(1),
       });
       assert.isTrue(Option.isNone(yield* secrets.get(secretName)));
     }).pipe(Effect.provide(makeServerSettingsLayerWithSecrets())),

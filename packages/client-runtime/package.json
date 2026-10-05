@@ -179,9 +179,9 @@
       "types": "./src/state/device.ts",
       "default": "./src/state/device.ts"
     },
-    "./state/sandbox": {
-      "types": "./src/state/sandbox.ts",
-      "default": "./src/state/sandbox.ts"
+    "./state/cube": {
+      "types": "./src/state/cube.ts",
+      "default": "./src/state/cube.ts"
     },
     "./state/deviceHubAccess": {
       "types": "./src/state/deviceHubAccess.ts",
