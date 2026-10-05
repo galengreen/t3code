@@ -118,7 +118,10 @@ using a proxy through `ANTHROPIC_AUTH_TOKEN`.
 
 On web and desktop, **Usage → Cubes** appears once an environment hosts cubes. It shows how long
 each cube ran in the selected period and an estimated cost, by day and by cube. The host records
-running time every minute while it is on, so time while the host is off or asleep is missing.
+running time every minute while it is on. A cube home that slept catches up when it wakes, from
+Fly's record of when each cube started and stopped, so time cubes worked with every computer off is
+included. Time a Docker cube ran while its host was off is missing, as is any cube deleted before
+the home woke.
 
 Fly cubes are priced for their size and region at the rates Fly reports, checked daily, or at
 Fly's published rates when Fly cannot be asked. Fly does not report actual charges, so use

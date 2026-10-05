@@ -8,7 +8,7 @@ import { HttpClient, HttpClientResponse } from "effect/unstable/http";
 import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import { CubeDrivers, type CubeMachine } from "./CubeDriver.ts";
-import type { FlyCubeDriver } from "./FlyCubeDriver.ts";
+import type { FlyCubeDriver, FlyMachineEvent } from "./FlyCubeDriver.ts";
 import * as CubeUsage from "./CubeUsage.ts";
 import { BUILT_IN_RATES, usdPerSecond } from "./flyPricing.ts";
 
@@ -28,18 +28,28 @@ const machine = (id: string, overrides: Partial<CubeMachine> = {}): CubeMachine 
   ...overrides,
 });
 
-const driver = (machines: () => ReadonlyArray<CubeMachine>) =>
-  ({ list: Effect.sync(machines) }) as unknown as FlyCubeDriver;
+const driver = (
+  machines: () => ReadonlyArray<CubeMachine>,
+  events: Readonly<Record<string, ReadonlyArray<FlyMachineEvent>>> = {},
+) =>
+  ({
+    list: Effect.sync(machines),
+    events: (id: string) => Effect.succeed(events[id] ?? []),
+  }) as unknown as FlyCubeDriver;
 
 const usageLayer = (options: {
   readonly docker: () => ReadonlyArray<CubeMachine>;
   readonly fly: () => ReadonlyArray<CubeMachine>;
+  readonly flyEvents?: Readonly<Record<string, ReadonlyArray<FlyMachineEvent>>>;
   /** What Fly's GraphQL API answers with; a failure when absent. */
   readonly flyPrices?: { readonly shared: number; readonly performance: number };
 }) =>
   CubeUsage.layer.pipe(
     Layer.provide(
-      Layer.succeed(CubeDrivers, { docker: driver(options.docker), fly: driver(options.fly) }),
+      Layer.succeed(CubeDrivers, {
+        docker: driver(options.docker),
+        fly: driver(options.fly, options.flyEvents),
+      }),
     ),
     Layer.provide(
       ServerSettings.layerTest({
@@ -150,7 +160,7 @@ describe("CubeUsage", () => {
     }),
   );
 
-  it.effect("does not credit time the host spent asleep", () =>
+  it.effect("gives Docker cubes at most two minutes after the host slept", () =>
     Effect.gen(function* () {
       yield* TestClock.setTime(Date.parse("2026-10-06T09:00:00Z"));
       const report = yield* Effect.gen(function* () {
@@ -162,6 +172,57 @@ describe("CubeUsage", () => {
         Effect.provide(usageLayer({ docker: () => [machine("dockercube01")], fly: () => [] })),
       );
       expect(report.buckets.map((bucket) => bucket.runningSeconds)).toEqual([120]);
+    }),
+  );
+
+  it.effect("backfills Fly cubes' running time while the host slept from their events", () =>
+    Effect.gen(function* () {
+      yield* TestClock.setTime(Date.parse("2026-10-06T09:00:00Z"));
+      const at = (time: string) => Date.parse(`2026-10-06T${time}Z`);
+      const report = yield* Effect.gen(function* () {
+        const usage = yield* CubeUsage.CubeUsage;
+        // The home sleeps for three hours, and wakes to find:
+        yield* TestClock.adjust("3 hours");
+        yield* usage.sample;
+        return yield* usage.read(WINDOW);
+      }).pipe(
+        Effect.provide(
+          usageLayer({
+            docker: () => [],
+            fly: () => [
+              machine("worked000001", { billing: SMALL }),
+              machine("truncated001", { state: "stopped", billing: SMALL }),
+            ],
+            flyEvents: {
+              // Running when the home slept, idle at 10:20, woken at 11:50.
+              worked000001: [
+                { timestamp: at("08:30:00"), status: "started" },
+                { timestamp: at("10:20:00"), status: "suspending" },
+                { timestamp: at("10:20:05"), status: "suspended" },
+                { timestamp: at("11:49:59"), status: "starting" },
+                { timestamp: at("11:50:00"), status: "started" },
+              ],
+              // Events that start mid-gap: suspending means it ran until then.
+              truncated001: [{ timestamp: at("09:30:00"), status: "suspending" }],
+            },
+          }),
+        ),
+      );
+      const seconds = report.buckets.map(({ hourStart, cubeId, runningSeconds }) => [
+        hourStart.slice(11, 13),
+        cubeId,
+        runningSeconds,
+      ]);
+      expect(seconds).toEqual([
+        ["09", "truncated001", 1800],
+        ["09", "worked000001", 3600],
+        ["10", "worked000001", 1200],
+        ["11", "worked000001", 600],
+      ]);
+      expect(report.buckets[1]!.costUsd).toBeCloseTo(
+        usdPerSecond(SMALL, BUILT_IN_RATES) * 3600,
+        12,
+      );
     }),
   );
 
