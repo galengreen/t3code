@@ -78,6 +78,14 @@ const decodeRemovedRecords = Schema.decodeUnknownEffect(RemovedRecords);
 const encodeRemovedRecords = Schema.encodeEffect(RemovedRecords);
 const decodeDescriptor = Schema.decodeUnknownEffect(EnvironmentDescriptor);
 
+/**
+ * How long a new spare runs after its server answers before it is parked.
+ * Spares suspended seconds after boot have twice resumed into a frozen
+ * machine (no logs, no HTTP, no exec); those that slept after running a while
+ * never have. Letting boot settle costs a minute of a small machine.
+ */
+const SPARE_SETTLE = Duration.minutes(1);
+
 /** A spare is named before anyone knows what it will be for, so every sandbox is named by id. */
 const sandboxLabel = (id: SandboxId) => `Cube ${id.slice(0, 6)}`;
 
@@ -408,6 +416,7 @@ const make = Effect.gen(function* () {
         const id = yield* makeMachine(current, wanted);
         yield* drivers[backend].find(id, "create").pipe(
           Effect.flatMap((machine) => waitUntilReady(machine, "create")),
+          Effect.andThen(Effect.sleep(SPARE_SETTLE)),
           Effect.andThen(drivers[backend].park(id)),
           // A spare that never got ready, or whose refill was interrupted (a CLI
           // create exits right after claiming), is no use; remove it now.
@@ -428,6 +437,13 @@ const make = Effect.gen(function* () {
     function* (input) {
       const current = yield* ensureAvailable;
       const backend = current.sandboxBackend;
+      /** Starts the clone, which detaches inside the sandbox and returns at once. */
+      const startClone = (sandbox: SandboxSummary) =>
+        input.repositoryUrl === undefined
+          ? Effect.void
+          : drivers[backend]
+              .exec(sandbox.id, ["t3-sandbox-clone", input.repositoryUrl], "clone")
+              .pipe(Effect.asVoid);
       const claimed = current.sandboxKeepReady
         ? yield* claimSpare(current).pipe(
             Effect.flatMap((id) =>
@@ -435,7 +451,9 @@ const make = Effect.gen(function* () {
                 ? Effect.succeed(null)
                 : drivers[backend].start(id).pipe(
                     Effect.andThen(ready(backend, id, "create")),
-                    // A spare that will not wake is no use to anyone.
+                    Effect.tap(startClone),
+                    // A spare that will not wake, or wakes and then stops
+                    // answering, is no use to anyone; a fresh one is made.
                     Effect.tapError(() => drivers[backend].remove(id).pipe(Effect.ignore)),
                   ),
             ),
@@ -447,14 +465,10 @@ const make = Effect.gen(function* () {
           )
         : null;
       const sandbox =
-        claimed ?? (yield* ready(backend, yield* makeMachine(current, null), "create"));
-      if (input.repositoryUrl) {
-        yield* drivers[backend].exec(
-          sandbox.id,
-          ["t3-sandbox-clone", input.repositoryUrl],
-          "clone",
-        );
-      }
+        claimed ??
+        (yield* ready(backend, yield* makeMachine(current, null), "create").pipe(
+          Effect.tap(startClone),
+        ));
       if (current.sandboxKeepReady) yield* refillSpare;
       return sandbox;
     },

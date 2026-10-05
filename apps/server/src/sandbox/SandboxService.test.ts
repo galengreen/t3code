@@ -2,6 +2,7 @@ import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as TestClock from "effect/testing/TestClock";
 import * as Layer from "effect/Layer";
 import { HttpClient, HttpClientResponse } from "effect/unstable/http";
@@ -25,6 +26,7 @@ const fakeDocker = () => {
   const volumes = new Set<string>();
   const calls: string[][] = [];
   let stopTime = "2026-10-01T00:00:00Z";
+  const failingClones = new Set<string>();
   const envs: Array<NodeJS.ProcessEnv | undefined> = [];
   const output = (stdout: string, code = 0, stderr = "") => ({
     stdout,
@@ -114,6 +116,9 @@ const fakeDocker = () => {
         volumes.delete(rest.at(-1)!);
         return output("");
       case "exec":
+        if (rest.includes("t3-sandbox-clone") && failingClones.has(rest[2]!)) {
+          return output("", 1, "exec request failed: EOF");
+        }
         return output(
           rest.includes("t3-sandbox-clone")
             ? ""
@@ -133,6 +138,8 @@ const fakeDocker = () => {
     calls,
     envs,
     run,
+    /** Containers whose clone fails, as a frozen machine's exec does. */
+    failingClones,
     stopAt: (time: string) => {
       stopTime = time;
     },
@@ -186,6 +193,14 @@ const serviceLayer = (
     Layer.provideMerge(NodeServices.layer),
   );
 
+/** Refills the spare, letting a new one settle (a minute) before it is parked. */
+const refillSpare = (sandboxes: SandboxService.SandboxService["Service"]) =>
+  Effect.gen(function* () {
+    const refill = yield* Effect.forkChild(sandboxes.keepSpareReady);
+    yield* TestClock.adjust("2 minutes");
+    yield* Fiber.join(refill);
+  });
+
 describe("SandboxService", () => {
   it.effect(
     "creates a labelled container on host loopback and clones into it once it answers",
@@ -235,7 +250,7 @@ describe("SandboxService", () => {
     const docker = fakeDocker();
     return Effect.gen(function* () {
       const sandboxes = yield* SandboxService.SandboxService;
-      yield* sandboxes.keepSpareReady;
+      yield* refillSpare(sandboxes);
       const [spareName, spare] = [...docker.containers][0]!;
       expect(spareName).toMatch(/^t3-spare-/);
       expect(spare!.status).toBe("paused");
@@ -250,11 +265,29 @@ describe("SandboxService", () => {
       expect(created.state).toBe("running");
 
       // The claim leaves a new spare in its place.
-      yield* sandboxes.keepSpareReady;
+      yield* refillSpare(sandboxes);
       const spares = [...docker.containers.keys()].filter((name) => name.startsWith("t3-spare-"));
       expect(spares).toHaveLength(1);
       expect(docker.containers.get(spares[0]!)?.status).toBe("paused");
       expect((yield* sandboxes.list).map((sandbox) => sandbox.id)).toEqual([created.id]);
+    }).pipe(Effect.provide(serviceLayer(docker, true, () => true, true)));
+  });
+
+  it.effect("replaces a spare that fails once claimed with a fresh sandbox", () => {
+    const docker = fakeDocker();
+    return Effect.gen(function* () {
+      const sandboxes = yield* SandboxService.SandboxService;
+      yield* refillSpare(sandboxes);
+      const [spareName] = [...docker.containers.keys()];
+      const spareId = spareName!.replace("t3-spare-", "");
+      docker.failingClones.add(`t3-sandbox-${spareId}`);
+
+      const created = yield* sandboxes.create({
+        repositoryUrl: "https://github.com/example/app.git",
+      });
+      expect(created.id).not.toBe(spareId);
+      expect(docker.containers.has(`t3-sandbox-${spareId}`)).toBe(false);
+      expect(docker.containers.get(`t3-sandbox-${created.id}`)?.status).toBe("running");
     }).pipe(Effect.provide(serviceLayer(docker, true, () => true, true)));
   });
 
@@ -266,18 +299,18 @@ describe("SandboxService", () => {
         const sandboxes = yield* SandboxService.SandboxService;
         const settings = yield* ServerSettings.ServerSettingsService;
         const spares = () => [...docker.containers.keys()];
-        yield* sandboxes.keepSpareReady;
+        yield* refillSpare(sandboxes);
         const [first] = spares();
-        yield* sandboxes.keepSpareReady;
+        yield* refillSpare(sandboxes);
         expect(spares()).toEqual([first]);
 
         yield* settings.updateSettings({ sandboxSize: "medium" });
-        yield* sandboxes.keepSpareReady;
+        yield* refillSpare(sandboxes);
         expect(spares()).toHaveLength(1);
         expect(spares()[0]).not.toBe(first);
 
         yield* settings.updateSettings({ sandboxKeepReady: false });
-        yield* sandboxes.keepSpareReady;
+        yield* refillSpare(sandboxes);
         expect(spares()).toEqual([]);
         expect(docker.volumes.size).toBe(0);
       }).pipe(Effect.provide(serviceLayer(docker, true, () => true, true)));
