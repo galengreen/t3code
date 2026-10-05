@@ -249,6 +249,20 @@ function ProviderEnvironmentFieldRow(props: {
   );
 }
 
+/** A provider instance's environment variables, also used when adding one. */
+export function ProviderEnvironmentSection(props: {
+  readonly environment: ReadonlyArray<ProviderInstanceEnvironmentVariable>;
+  readonly onChange: (environment: ReadonlyArray<ProviderInstanceEnvironmentVariable>) => void;
+}) {
+  return (
+    <EnvironmentVariablesEditor
+      description="API keys, base URLs, and other per-instance CLI settings."
+      environment={props.environment}
+      onChange={props.onChange}
+    />
+  );
+}
+
 interface ProviderInstanceCardProps {
   readonly instanceId: ProviderInstanceId;
   readonly instance: ProviderInstanceConfig;
@@ -497,8 +511,16 @@ export function ProviderInstanceCard({
       driverKind={driverKind ?? instance.driver}
       displayName={displayName}
       accentColor={accentColor}
-      acpRegistryAgentId={readConfigString(instance.config, "agentId") ?? undefined}
-      acpRegistryIconUrl={readConfigString(instance.config, "registryIconUrl") ?? undefined}
+      acpRegistryAgentId={
+        readConfigString(instance.config, "source") === "local"
+          ? undefined
+          : (readConfigString(instance.config, "agentId") ?? undefined)
+      }
+      acpRegistryIconUrl={
+        readConfigString(instance.config, "source") === "local"
+          ? undefined
+          : (readConfigString(instance.config, "registryIconUrl") ?? undefined)
+      }
       showBadge={Boolean(accentColor)}
       className="size-5"
       iconClassName="size-4 text-foreground/80"
@@ -884,8 +906,7 @@ export function ProviderInstanceCard({
         aria-disabled={readOnly || undefined}
         className={readOnly ? "opacity-50 select-none" : undefined}
       >
-        <EnvironmentVariablesEditor
-          description="API keys, base URLs, and other per-instance CLI settings."
+        <ProviderEnvironmentSection
           environment={genericEnvironment}
           onChange={updateGenericEnvironment}
         />

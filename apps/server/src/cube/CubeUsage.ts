@@ -30,8 +30,8 @@ import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Ref from "effect/Ref";
-import { HttpClient } from "effect/unstable/http";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import { HttpClient } from "effect/http";
+import * as SqlClient from "effect/sql/SqlClient";
 
 import * as ServerSettings from "../serverSettings.ts";
 import { CubeDrivers, type CubeMachine } from "./CubeDriver.ts";

@@ -8,7 +8,7 @@ import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as PartitionedSemaphore from "effect/PartitionedSemaphore";
 import * as SubscriptionRef from "effect/SubscriptionRef";
-import type { Atom } from "effect/unstable/reactivity";
+import type { Atom } from "effect/reactivity";
 
 import type { ConnectionCatalogEntry, ConnectWhen } from "../connection/catalog.ts";
 import * as ConnectionOnboarding from "../connection/onboarding.ts";

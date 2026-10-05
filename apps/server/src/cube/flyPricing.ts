@@ -13,7 +13,7 @@
  */
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
-import { HttpClient, HttpClientRequest } from "effect/unstable/http";
+import { HttpClient, HttpClientRequest } from "effect/http";
 
 import type { CubeBilling } from "./CubeDriver.ts";
 import { flyAuthorization } from "./FlyCubeDriver.ts";

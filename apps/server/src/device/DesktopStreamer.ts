@@ -25,11 +25,11 @@ import * as Path from "effect/Path";
 import * as Queue from "effect/Queue";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
-import type { HttpServerRequest } from "effect/unstable/http";
-import { HttpServerResponse } from "effect/unstable/http";
-import * as ChildProcess from "effect/unstable/process/ChildProcess";
-import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
-import * as Socket from "effect/unstable/socket/Socket";
+import type { HttpServerRequest } from "effect/http";
+import { HttpServerResponse } from "effect/http";
+import * as ChildProcess from "effect/process/ChildProcess";
+import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
+import * as Socket from "effect/socket/Socket";
 
 import * as ProcessRunner from "../processRunner.ts";
 

@@ -31,7 +31,7 @@ import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Ref from "effect/Ref";
 import * as Schedule from "effect/Schedule";
-import { HttpClient, HttpClientRequest } from "effect/unstable/http";
+import { HttpClient, HttpClientRequest } from "effect/http";
 import * as NodeHttpClient from "@effect/platform-node/NodeHttpClient";
 
 import * as BackgroundPolicy from "../background/BackgroundPolicy.ts";

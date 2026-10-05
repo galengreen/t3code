@@ -15,7 +15,7 @@ import {
 import type { EnvironmentId, CubeSummary } from "@t3tools/contracts";
 import { useAtomValue } from "@effect/atom-react";
 import * as Effect from "effect/Effect";
-import { Atom } from "effect/unstable/reactivity";
+import { Atom } from "effect/reactivity";
 import { useMemo } from "react";
 
 import { connectionAtomRuntime } from "../connection/runtime";

@@ -2,7 +2,7 @@ import { describe, expect, it } from "@effect/vitest";
 import { EnvironmentId } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
-import { HttpClient, HttpClientResponse, UrlParams } from "effect/unstable/http";
+import { HttpClient, HttpClientResponse, UrlParams } from "effect/http";
 
 import * as ServerSettings from "../serverSettings.ts";
 import * as FlyCubeDriver from "./FlyCubeDriver.ts";
