@@ -3008,14 +3008,22 @@ export default function ChatView(props: ChatViewProps) {
       ? null
       : clampFileAttachmentUploadBytes(advertisedFileAttachmentBytes);
   const envLocked = Boolean(activeThread && (activeMessageCount > 0 || activeRuntime !== null));
-  // A new thread can start in a fresh sandbox on this environment when it has
-  // sandboxes switched on and the project has a remote to clone.
+  // A new thread can start in a fresh sandbox when the project has a remote to
+  // clone and a host can make one: this environment, or, for a draft that is
+  // already in a sandbox, the host that made it.
+  const draftSandbox = useSandboxForEnvironment(draftId ? environmentId : null);
+  const sandboxHostEnvironmentId = draftSandbox?.hostEnvironmentId ?? environmentId;
+  const sandboxHostEnabled =
+    draftSandbox === null
+      ? settings.enableSandboxes
+      : environmentById.get(sandboxHostEnvironmentId)?.serverConfig?.settings.enableSandboxes ===
+        true;
   const sandboxRepositoryUrl = activeProject?.repositoryIdentity?.locator.remoteUrl ?? null;
   const sandboxAvailable = Boolean(
-    draftId && !envLocked && settings.enableSandboxes && sandboxRepositoryUrl,
+    draftId && !envLocked && sandboxHostEnabled && sandboxRepositoryUrl,
   );
   const sandboxUnavailableReason =
-    draftId && !envLocked && settings.enableSandboxes && !sandboxRepositoryUrl
+    draftId && !envLocked && sandboxHostEnabled && !sandboxRepositoryUrl
       ? "This project has no git remote to clone."
       : undefined;
   const sandboxSelected = sandboxAvailable && draftThread?.environmentSelection === "sandbox";
@@ -4537,7 +4545,7 @@ export default function ChatView(props: ChatViewProps) {
     setSandboxLaunchPrompt(promptRef.current);
     void sandboxDraftLaunch
       .launch({
-        hostEnvironmentId: environmentId,
+        hostEnvironmentId: sandboxHostEnvironmentId,
         repositoryUrl: sandboxRepositoryUrl,
         logicalProjectKey: deriveLogicalProjectKeyFromSettings(
           activeProject,
