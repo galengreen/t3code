@@ -264,6 +264,8 @@ import {
   CubeError,
   CubeFlyAccount,
   CubeFlyAccountInput,
+  CubeUsage,
+  CubeUsageInput,
   CubeIdInput,
   CubePairing,
   CubeSummary,
@@ -450,6 +452,7 @@ export const WS_METHODS = {
   cubeRemovedEnvironments: "cube.removedEnvironments",
   cubeSleep: "cube.sleep",
   cubeCreateHome: "cube.createHome",
+  cubeUsage: "cube.usage",
 
   // Server meta
   serverProbe: "server.probe",
@@ -1520,6 +1523,12 @@ const WsCubeRemovedEnvironmentsRpc = Rpc.make(WS_METHODS.cubeRemovedEnvironments
   error: Schema.Union([CubeError, EnvironmentAuthorizationError]),
 });
 
+const WsCubeUsageRpc = Rpc.make(WS_METHODS.cubeUsage, {
+  payload: CubeUsageInput,
+  success: CubeUsage,
+  error: Schema.Union([CubeError, EnvironmentAuthorizationError]),
+});
+
 const WsCubeFlyAccountRpc = Rpc.make(WS_METHODS.cubeFlyAccount, {
   payload: CubeFlyAccountInput,
   success: CubeFlyAccount,
@@ -1948,6 +1957,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsCubeRemoveRpc,
   WsCubeFlyAccountRpc,
   WsCubeRemovedEnvironmentsRpc,
+  WsCubeUsageRpc,
   WsCubeSleepRpc,
   WsCubeCreateHomeRpc,
   WsCubePairRpc,

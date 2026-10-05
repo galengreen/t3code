@@ -42,6 +42,12 @@ export function createCubeEnvironmentAtoms<R, E>(
       label: "environment-data:cube:fly-account",
       tag: WS_METHODS.cubeFlyAccount,
     }),
+    /** Recorded running time and cost in a window. */
+    usage: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:cube:usage",
+      tag: WS_METHODS.cubeUsage,
+      staleTimeMs: 60_000,
+    }),
     /** Checks a pasted Fly token before it is saved. */
     checkFlyToken: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:cube:check-fly-token",

@@ -210,6 +210,7 @@ export const RPC_REQUIRED_SCOPES = {
   [WS_METHODS.cubeRemovedEnvironments]: AuthOrchestrationReadScope,
   [WS_METHODS.cubeSleep]: AuthOrchestrationOperateScope,
   [WS_METHODS.cubeCreateHome]: AuthOrchestrationOperateScope,
+  [WS_METHODS.cubeUsage]: AuthOrchestrationReadScope,
   [WS_METHODS.subscribeServerConfig]: AuthOrchestrationReadScope,
   [WS_METHODS.subscribeServerLifecycle]: AuthOrchestrationReadScope,
   [WS_METHODS.subscribeAuthAccess]: AuthAccessReadScope,

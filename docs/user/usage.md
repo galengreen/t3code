@@ -114,6 +114,17 @@ or endpoint configurations do not report subscription limits.
 API-key accounts may not report subscription limits. This also applies to Claude connections
 using a proxy through `ANTHROPIC_AUTH_TOKEN`.
 
+## See what cubes cost
+
+On web and desktop, **Usage → Cubes** appears once an environment hosts cubes. It shows how long
+each cube ran in the selected period and an estimated cost, by day and by cube. The host records
+running time every minute while it is on, so time while the host is off or asleep is missing.
+
+Fly cubes are priced for their size and region at the rates Fly reports, checked daily, or at
+Fly's published rates when Fly cannot be asked. Fly does not report actual charges, so use
+**Billing on Fly** for your real bill. Docker cubes run on the host and are not charged.
+Storage for stopped cubes is not included.
+
 ## Connect a CLIProxyAPI hub
 
 To see pooled accounts, open **Settings → Providers → Usage providers → Add hub**. Choose the
@@ -136,7 +147,7 @@ Session, Weekly, or both for each provider. Reopen T3 to refresh expired reading
 ## Keyboard shortcuts
 
 On web and desktop, open Usage from the command palette. While on Usage,
-press `C`, `T`, or `L` for Cost, Tokens, or Limits while not typing in a field.
+press `C`, `T`, `L`, or `U` for Cost, Tokens, Limits, or Cubes while not typing in a field.
 Use `Ctrl+Shift+1/2/3/4` (`Cmd+Shift+1/2/3/4` on macOS) for the past
 24 hours, 7 days, 30 days, or 90 days. Period shortcuts do nothing on Limits.
 Press `Escape` to return to the previous page. Customize these shortcuts in

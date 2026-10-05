@@ -36,7 +36,13 @@ import * as Schema from "effect/Schema";
 import { HttpClient, HttpClientRequest } from "effect/unstable/http";
 
 import * as ServerSettings from "../serverSettings.ts";
-import type { CubeDriver, CubeMachine, CubeMachineSpec, CubeOperation } from "./CubeDriver.ts";
+import type {
+  CubeBilling,
+  CubeDriver,
+  CubeMachine,
+  CubeMachineSpec,
+  CubeOperation,
+} from "./CubeDriver.ts";
 
 const API_BASE = "https://api.machines.dev";
 const APP_PREFIX = "t3-cube-";
@@ -76,9 +82,17 @@ const MachineSummary = Schema.Struct({
   created_at: Schema.optional(Schema.String),
   updated_at: Schema.optional(Schema.String),
   app_name: Schema.optional(Schema.String),
+  region: Schema.optional(Schema.String),
   config: Schema.optional(
     Schema.Struct({
       image: Schema.optional(Schema.String),
+      guest: Schema.optional(
+        Schema.Struct({
+          cpu_kind: Schema.optional(Schema.String),
+          cpus: Schema.optional(Schema.Number),
+          memory_mb: Schema.optional(Schema.Number),
+        }),
+      ),
       metadata: Schema.optional(Schema.NullOr(Schema.Record(Schema.String, Schema.String))),
     }),
   ),
@@ -147,6 +161,18 @@ const toMachine = (app: string, machine: MachineSummary): CubeMachine | null => 
     stoppedAt: state === "stopped" ? (machine.updated_at ?? null) : null,
     httpBaseUrl: `https://${app}.fly.dev`,
     spare: machine.config?.metadata?.[SPARE_METADATA] ?? null,
+    billing: billingOf(machine),
+  };
+};
+
+/** Fly bills by the machine's guest; one made without a full guest is priced as small. */
+const billingOf = (machine: MachineSummary): CubeBilling => {
+  const guest = machine.config?.guest;
+  return {
+    cpuKind: guest?.cpu_kind === "performance" ? "performance" : "shared",
+    cpus: guest?.cpus ?? GUESTS.small.cpus,
+    memoryMb: guest?.memory_mb ?? GUESTS.small.memory_mb,
+    region: machine.region ?? null,
   };
 };
 

@@ -176,6 +176,7 @@ import { orchestrationHttpApiLayer } from "./orchestration-v2/http.ts";
 import { projectHttpApiLayer } from "./project/http.ts";
 import { cubeHttpApiLayer } from "./cube/http.ts";
 import { serverSettingsHttpApiLayer } from "./serverSettingsHttp.ts";
+import * as CubeUsage from "./cube/CubeUsage.ts";
 import * as NetService from "@t3tools/shared/Net";
 import * as RelayClient from "@t3tools/shared/relayClient";
 import { disableTailscaleServe, ensureTailscaleServe } from "@t3tools/tailscale";
@@ -409,7 +410,7 @@ const PreviewLayerLive = Layer.empty.pipe(
 
 const DesktopStreamerLayerLive = DesktopStreamer.layer.pipe(Layer.provide(ProcessRunner.layer));
 
-const CubeLayerLive = CubeService.layer.pipe(
+const CubeLayerLive = Layer.mergeAll(CubeService.layer, CubeUsage.layer).pipe(
   Layer.provide(CubeDrivers.layer),
   Layer.provide(ServerSettingsLayerLive),
   Layer.provide(ProcessRunner.layer),
@@ -1039,6 +1040,7 @@ const makeServerLayer = Layer.unwrap(
       HeapSnapshot.layer,
       CubeService.pruneLayer,
       CubeService.sparesLayer,
+      CubeUsage.samplerLayer,
     );
 
     return serverApplicationLayer.pipe(

@@ -178,6 +178,7 @@ describe("FlyCubeDriver", () => {
             environmentId: spec.environmentId,
             httpBaseUrl: "https://t3-cube-abc123def456.fly.dev",
             spare: null,
+            billing: { cpuKind: "shared", cpus: 2, memoryMb: 2048, region: null },
           },
         ]);
       }),
