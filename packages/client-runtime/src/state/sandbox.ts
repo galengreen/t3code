@@ -269,12 +269,19 @@ export const changeSandboxEnvironment = Effect.fn("clientRuntime.sandbox.change"
       break;
     }
     case "stop":
+      if (sandboxConnectWhen(sandbox) === "needed" && sandbox.environmentId !== null) {
+        // A Fly sandbox puts itself to sleep, refusing while its agent works,
+        // and then this client stays disconnected until it is next needed. A
+        // sandbox this client cannot reach is asleep already.
+        yield* registry
+          .run(sandbox.environmentId, request(WS_METHODS.sandboxSleep, {}))
+          .pipe(Effect.catchTag("EnvironmentRpcUnavailableError", () => Effect.void));
+        yield* registry.disconnect(sandbox.environmentId);
+        break;
+      }
+      // A Docker sandbox is switched off until it is started again.
       if (sandbox.environmentId !== null) {
-        // A Fly sandbox wakes when something connects, so close this client's
-        // connection first; a Docker one is switched off until it is started.
-        yield* sandboxConnectWhen(sandbox) === "needed"
-          ? registry.disconnect(sandbox.environmentId)
-          : registry.setEnabled(sandbox.environmentId, false).pipe(Effect.ignore);
+        yield* registry.setEnabled(sandbox.environmentId, false).pipe(Effect.ignore);
       }
       yield* registry.run(hostEnvironmentId, request(WS_METHODS.sandboxStop, { id: sandbox.id }));
       break;

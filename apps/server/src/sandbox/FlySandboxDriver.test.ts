@@ -82,6 +82,14 @@ const fakeFly = (
       }
       const machine = entry.machines.find((candidate) => candidate.id === machineId);
       if (!machine) return reply(404, { error: "no machine" });
+      if (action === undefined && request.method === "DELETE") {
+        // Like Fly, refuse to destroy a started machine without `force`.
+        if (machine.state === "started" && !query.includes("force=true")) {
+          return reply(412, { error: "failed_precondition: machine not stopped" });
+        }
+        entry.machines = entry.machines.filter((candidate) => candidate !== machine);
+        return reply(200, { ok: true });
+      }
       if (action === "wait") {
         if (waitTimeouts > 0) {
           waitTimeouts -= 1;
@@ -153,7 +161,7 @@ describe("FlySandboxDriver", () => {
             env: { T3_HOST: "0.0.0.0" },
             guest: { cpu_kind: "shared", cpus: 2, memory_mb: 2048 },
             restart: { policy: "no" },
-            services: [expect.objectContaining({ autostart: false, autostop: "off" })],
+            services: [expect.objectContaining({ autostart: true, autostop: "off" })],
           },
         });
         expect(toJson(create.body)).not.toContain("sk-ant-oat-secret");
@@ -190,6 +198,21 @@ describe("FlySandboxDriver", () => {
         expect((yield* driver.list)[0]?.spare).toBeNull();
         yield* driver.start(spec.id);
         expect((yield* driver.list)[0]?.state).toBe("running");
+      }),
+    );
+  });
+
+  it.effect("deletes only a machine that is not running, so a sandbox just woken is kept", () => {
+    const fly = fakeFly();
+    return run(fly, (driver) =>
+      Effect.gen(function* () {
+        yield* driver.create(spec);
+        expect(yield* driver.removeIfStopped(spec.id)).toBe(false);
+        expect(fly.apps.has("t3-sbx-abc123def456")).toBe(true);
+
+        yield* driver.park(spec.id);
+        expect(yield* driver.removeIfStopped(spec.id)).toBe(true);
+        expect(fly.apps.has("t3-sbx-abc123def456")).toBe(false);
       }),
     );
   });

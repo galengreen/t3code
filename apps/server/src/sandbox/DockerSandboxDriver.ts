@@ -284,6 +284,17 @@ export const make = Effect.gen(function* () {
         Effect.andThen(docker(["volume", "rm", "--force", volumeName(id)], "remove", id)),
         Effect.asVoid,
       ),
+    removeIfStopped: (id) =>
+      containerOf(id, "remove").pipe(
+        Effect.flatMap(({ container }) =>
+          // Without `--force`, Docker refuses to remove a running container.
+          docker(["rm", container], "remove", id).pipe(
+            Effect.andThen(docker(["volume", "rm", "--force", volumeName(id)], "remove", id)),
+            Effect.as(true),
+            Effect.catchTag("SandboxOperationError", () => Effect.succeed(false)),
+          ),
+        ),
+      ),
     exec: (id, command, operation) =>
       containerOf(id, operation).pipe(
         Effect.flatMap(({ container }) =>

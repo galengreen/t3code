@@ -27,6 +27,9 @@ if [ -S /.fly/api ]; then
   sudo chmod a+rw /.fly/api
 fi
 
+# A clone does not survive a reboot, so neither does its keep-awake marker.
+rm -f "$HOME/.t3/preparing.pid"
+
 mkdir -p "$HOME/work"
 cd "$HOME/work"
 exec t3 serve --host "${T3_HOST:-0.0.0.0}" --port 7777 --no-browser

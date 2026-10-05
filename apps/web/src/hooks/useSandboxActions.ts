@@ -16,14 +16,16 @@ export type SandboxMenuAction = "sandbox:start" | "sandbox:stop" | "sandbox:dele
 
 const FAILURE_TITLES: Record<SandboxMenuAction, string> = {
   "sandbox:start": "Could not start sandbox",
-  "sandbox:stop": "Could not stop sandbox",
+  "sandbox:stop": "Could not put sandbox to sleep",
   "sandbox:delete": "Could not delete sandbox",
 };
 
 /** Whether a thread menu should offer sandbox actions, read when the menu opens. */
 export function readThreadSandboxMenuState(environmentId: EnvironmentId) {
   const hosted = readSandboxForEnvironment(environmentId);
-  return hosted ? { state: hosted.sandbox.state } : null;
+  return hosted
+    ? { state: hosted.sandbox.state, wakesOnRequest: hosted.sandbox.backend === "fly" }
+    : null;
 }
 
 /**

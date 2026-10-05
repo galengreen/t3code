@@ -2057,9 +2057,10 @@ export default function ChatView(props: ChatViewProps) {
     [draftThread, fallbackDraftProject, settings, threadId],
   );
   const isServerThread = serverThread !== null;
-  // Opening a thread whose sandbox is asleep wakes it, the way sending to it
-  // would. Only the state found on arrival counts: a sandbox the user stops
-  // while reading the thread stays stopped, and a failed start is not retried.
+  // Opening a thread whose Docker sandbox is stopped starts it through its
+  // host. (A Fly sandbox wakes when its thread connects; see below.) Only the
+  // state found on arrival counts: a sandbox the user stops while reading the
+  // thread stays stopped, and a failed start is not retried.
   const activeSandbox = useSandboxForEnvironment(isServerThread ? environmentId : null);
   const wakeSandbox = useAtomCommand(changeSandbox, { label: "wake sandbox" });
   const activeSandboxPendingChange = usePendingSandboxChange(activeSandbox?.sandbox.id ?? null);
@@ -2075,7 +2076,9 @@ export default function ChatView(props: ChatViewProps) {
   useEffect(() => {
     if (!activeSandbox || arrivedSandboxIdRef.current === activeSandbox.sandbox.id) return;
     arrivedSandboxIdRef.current = activeSandbox.sandbox.id;
-    if (activeSandbox.sandbox.state !== "stopped") return;
+    if (activeSandbox.sandbox.backend !== "docker" || activeSandbox.sandbox.state !== "stopped") {
+      return;
+    }
     wakeActiveSandbox();
   }, [activeSandbox, wakeActiveSandbox]);
   const activeThread = isServerThread ? serverThread : localDraftThread;
@@ -2624,9 +2627,9 @@ export default function ChatView(props: ChatViewProps) {
     activeEnvironmentConnectionPhase !== "connected" &&
     !activeEnvironmentConnectsWhenNeeded;
   // Opening a thread is a need: connect its environment if it connects only
-  // when needed. Once per arrival, so a sandbox put to sleep while the thread
-  // is open stays asleep until the user acts. A stopped sandbox is woken
-  // through its host above instead.
+  // when needed, which wakes a sleeping Fly sandbox. Once per arrival, so a
+  // sandbox put to sleep while the thread is open stays asleep until the user
+  // acts.
   const connectEnvironment = useAtomCommand(environmentCatalog.connect, { reportFailure: false });
   const arrivedOnDemandEnvironmentRef = useRef<EnvironmentId | null>(null);
   useEffect(() => {
@@ -2634,9 +2637,8 @@ export default function ChatView(props: ChatViewProps) {
     if (arrivedOnDemandEnvironmentRef.current === activeEnvironment.environmentId) return;
     arrivedOnDemandEnvironmentRef.current = activeEnvironment.environmentId;
     if (activeEnvironment.connection.phase !== "available") return;
-    if (activeSandbox?.sandbox.state === "stopped") return;
     void connectEnvironment(activeEnvironment.environmentId);
-  }, [activeEnvironment, activeSandbox, connectEnvironment, isServerThread]);
+  }, [activeEnvironment, connectEnvironment, isServerThread]);
   const activeReconnectingEnvironmentId =
     activeEnvironmentConnectionPhase === "connecting" ||
     activeEnvironmentConnectionPhase === "reconnecting"
@@ -7340,7 +7342,14 @@ export default function ChatView(props: ChatViewProps) {
   // A sandbox that went to sleep while its thread is open says so, with the
   // way back, instead of leaving the thread looking disconnected.
   const sandboxSleepBannerItem = useMemo<ComposerBannerStackItem | null>(() => {
-    if (!activeSandbox || activeSandbox.sandbox.state === "running") return null;
+    // A Fly sandbox wakes when opened or sent to, so only Docker ones need it.
+    if (
+      !activeSandbox ||
+      activeSandbox.sandbox.backend !== "docker" ||
+      activeSandbox.sandbox.state === "running"
+    ) {
+      return null;
+    }
     const waking = activeSandboxPendingChange === "start";
     return {
       id: `sandbox-asleep:${activeSandbox.sandbox.id}`,

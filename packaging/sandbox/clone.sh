@@ -2,7 +2,8 @@
 # Clones a repository into ~/work and adds it as a project of the running
 # server. Returns at once and finishes in the background, so the host is not
 # held for the length of a clone; clients see the project when it is done.
-# Output goes to ~/.t3/clone-<name>.log.
+# Output goes to ~/.t3/clone-<name>.log. While it runs, its process id is in
+# ~/.t3/preparing.pid, which keeps the sandbox from sleeping mid-clone.
 #
 # Usage: t3-sandbox-clone <git url>
 set -eu
@@ -17,6 +18,8 @@ if [ "${T3_SANDBOX_CLONE_DETACHED:-}" != 1 ]; then
   exit 0
 fi
 
+echo $$ > "$HOME/.t3/preparing.pid"
+trap 'rm -f "$HOME/.t3/preparing.pid"' EXIT
 [ -d "$dest/.git" ] || git clone --depth 50 "$url" "$dest"
 for _ in 1 2 3 4 5 6 7 8 9 10; do
   t3 project add "$dest" && exit 0

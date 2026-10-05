@@ -448,6 +448,7 @@ export const WS_METHODS = {
   sandboxPair: "sandbox.pair",
   sandboxFlyAccount: "sandbox.flyAccount",
   sandboxRemovedEnvironments: "sandbox.removedEnvironments",
+  sandboxSleep: "sandbox.sleep",
 
   // Server meta
   serverProbe: "server.probe",
@@ -1496,6 +1497,13 @@ const WsSandboxPairRpc = Rpc.make(WS_METHODS.sandboxPair, {
   error: Schema.Union([SandboxError, EnvironmentAuthorizationError]),
 });
 
+// Served by a sandbox's own server: puts its machine to sleep now, unless its
+// agent is working or its repository is still being prepared. Answers first.
+const WsSandboxSleepRpc = Rpc.make(WS_METHODS.sandboxSleep, {
+  payload: Schema.Struct({}),
+  error: Schema.Union([SandboxError, EnvironmentAuthorizationError]),
+});
+
 const WsSandboxRemovedEnvironmentsRpc = Rpc.make(WS_METHODS.sandboxRemovedEnvironments, {
   payload: Schema.Struct({}),
   success: Schema.Array(EnvironmentId),
@@ -1930,6 +1938,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsSandboxRemoveRpc,
   WsSandboxFlyAccountRpc,
   WsSandboxRemovedEnvironmentsRpc,
+  WsSandboxSleepRpc,
   WsSandboxPairRpc,
   WsSubscribeServerConfigRpc,
   WsSubscribeServerLifecycleRpc,

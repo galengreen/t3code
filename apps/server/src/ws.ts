@@ -179,6 +179,7 @@ import { withTerminalOutputWindow } from "./terminal/OutputProtocol.ts";
 import * as PreviewAutomationBroker from "./mcp/PreviewAutomationBroker.ts";
 import * as DeviceService from "./device/DeviceService.ts";
 import * as SandboxService from "./sandbox/SandboxService.ts";
+import * as IdleShutdown from "./sandbox/IdleShutdown.ts";
 import { remoteSshDeviceHosts } from "./device/localSshDeviceHost.ts";
 import * as PreviewManager from "./preview/Manager.ts";
 import { issueAssetUrl } from "./assets/AssetAccess.ts";
@@ -1220,6 +1221,7 @@ const makeWsRpcLayer = (
       const pullRequestSync = yield* PullRequestSyncReactor.PullRequestSyncReactor;
       const deviceService = yield* DeviceService.DeviceService;
       const sandboxService = yield* SandboxService.SandboxService;
+      const idleShutdown = yield* IdleShutdown.IdleShutdown;
       const deviceHostContext =
         yield* Effect.context<Effect.Services<ReturnType<typeof remoteSshDeviceHosts>>>();
       const orchestrationEngine = yield* Orchestrator.OrchestratorV2;
@@ -3589,6 +3591,10 @@ const makeWsRpcLayer = (
             sandboxService.removedEnvironments,
             { "rpc.aggregate": "sandbox" },
           ),
+        [WS_METHODS.sandboxSleep]: (_input) =>
+          observeRpcEffect(WS_METHODS.sandboxSleep, idleShutdown.sleepNow, {
+            "rpc.aggregate": "sandbox",
+          }),
         [WS_METHODS.sandboxFlyAccount]: (input) =>
           observeRpcEffect(WS_METHODS.sandboxFlyAccount, sandboxService.flyAccount(input), {
             "rpc.aggregate": "sandbox",

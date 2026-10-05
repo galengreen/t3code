@@ -172,13 +172,24 @@ describe("buildThreadActionMenuItems", () => {
   });
 
   it("offers waking a stopped sandbox and stopping a running one, with delete beside", () => {
-    expect(allIds({ ...baseState, sandbox: { state: "stopped" } })).toEqual(
+    const docker = { wakesOnRequest: false };
+    expect(allIds({ ...baseState, sandbox: { ...docker, state: "stopped" } })).toEqual(
       expect.arrayContaining(["sandbox", "sandbox:start", "sandbox:delete"]),
     );
-    const running = allIds({ ...baseState, sandbox: { state: "running" } });
+    const running = allIds({ ...baseState, sandbox: { ...docker, state: "running" } });
     expect(running).toContain("sandbox:stop");
     expect(running).not.toContain("sandbox:start");
     expect(allIds(baseState)).not.toContain("sandbox");
+  });
+
+  it("offers putting a Fly sandbox to sleep, and no Start, since opening it wakes it", () => {
+    const fly = { wakesOnRequest: true };
+    const asleep = allIds({ ...baseState, sandbox: { ...fly, state: "stopped" } });
+    expect(asleep).not.toContain("sandbox:start");
+    expect(asleep).toContain("sandbox:delete");
+    expect(allIds({ ...baseState, sandbox: { ...fly, state: "running" } })).toContain(
+      "sandbox:stop",
+    );
   });
 });
 

@@ -43,6 +43,16 @@ import {
 } from "./orchestrationV2.ts";
 import { Project, ProjectMutation, ProjectSnapshot } from "./project.ts";
 import {
+  SandboxCreateInput,
+  SandboxIdInput,
+  SandboxNotFoundError,
+  SandboxNotRunningError,
+  SandboxOperationError,
+  SandboxPairing,
+  SandboxSummary,
+  SandboxUnavailableError,
+} from "./sandbox.ts";
+import {
   PullRequestDiffInput,
   PullRequestDiffResult,
   PullRequestOperationError,
@@ -574,6 +584,67 @@ class EnvironmentProjectsHttpApi extends HttpApiGroup.make("projects")
     }).middleware(EnvironmentAuthenticatedAuth),
   ) {}
 
+const EnvironmentSandboxErrors = [
+  SandboxUnavailableError,
+  SandboxNotFoundError,
+  SandboxNotRunningError,
+  SandboxOperationError,
+  EnvironmentScopeRequiredError,
+  EnvironmentInternalError,
+] as const;
+
+/**
+ * The host's sandboxes, for `t3 sandbox` commands: they run through the live
+ * server, so its locks and spare are the only ones in play.
+ */
+class EnvironmentSandboxesHttpApi extends HttpApiGroup.make("sandboxes")
+  .add(
+    HttpApiEndpoint.get("list", "/api/sandboxes", {
+      headers: OptionalBearerHeaders,
+      success: Schema.Array(SandboxSummary),
+      error: EnvironmentSandboxErrors,
+    }).middleware(EnvironmentAuthenticatedAuth),
+  )
+  .add(
+    HttpApiEndpoint.post("create", "/api/sandboxes/create", {
+      headers: OptionalBearerHeaders,
+      payload: SandboxCreateInput,
+      success: SandboxSummary,
+      error: EnvironmentSandboxErrors,
+    }).middleware(EnvironmentAuthenticatedAuth),
+  )
+  .add(
+    HttpApiEndpoint.post("start", "/api/sandboxes/start", {
+      headers: OptionalBearerHeaders,
+      payload: SandboxIdInput,
+      success: SandboxSummary,
+      error: EnvironmentSandboxErrors,
+    }).middleware(EnvironmentAuthenticatedAuth),
+  )
+  .add(
+    HttpApiEndpoint.post("stop", "/api/sandboxes/stop", {
+      headers: OptionalBearerHeaders,
+      payload: SandboxIdInput,
+      success: SandboxSummary,
+      error: EnvironmentSandboxErrors,
+    }).middleware(EnvironmentAuthenticatedAuth),
+  )
+  .add(
+    HttpApiEndpoint.post("remove", "/api/sandboxes/remove", {
+      headers: OptionalBearerHeaders,
+      payload: SandboxIdInput,
+      error: EnvironmentSandboxErrors,
+    }).middleware(EnvironmentAuthenticatedAuth),
+  )
+  .add(
+    HttpApiEndpoint.post("pair", "/api/sandboxes/pair", {
+      headers: OptionalBearerHeaders,
+      payload: SandboxIdInput,
+      success: SandboxPairing,
+      error: EnvironmentSandboxErrors,
+    }).middleware(EnvironmentAuthenticatedAuth),
+  ) {}
+
 /** Large, compressible pull-request payloads travel over HTTP rather than the RPC socket. */
 class EnvironmentPullRequestsHttpApi extends HttpApiGroup.make("pullRequests").add(
   HttpApiEndpoint.post("diff", "/api/pull-requests/diff", {
@@ -657,4 +728,5 @@ export class EnvironmentHttpApi extends HttpApi.make("environment")
   .add(EnvironmentOrchestrationHttpApi)
   .add(EnvironmentPullRequestsHttpApi)
   .add(EnvironmentProjectsHttpApi)
+  .add(EnvironmentSandboxesHttpApi)
   .add(EnvironmentConnectHttpApi) {}

@@ -4,93 +4,180 @@ import * as NodeHttp from "node:http";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 
+import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, expect, it } from "@effect/vitest";
+import * as Clock from "effect/Clock";
 import * as ConfigProvider from "effect/ConfigProvider";
+import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
+import * as PlatformError from "effect/PlatformError";
 import * as Layer from "effect/Layer";
 import * as Ref from "effect/Ref";
 import { TestClock } from "effect/testing";
 
+import * as ServerConfig from "../config.ts";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
 import * as IdleShutdown from "./IdleShutdown.ts";
 
 /**
- * Runs the idle check against a thread list whose run state the test controls.
- * Setting `frozen` holds the next check mid-way, as a suspended machine would.
+ * Runs the idle check against a thread list the test controls: whether a run
+ * is in progress, and when the latest run finished. Setting `frozen` holds the
+ * next check mid-way, as a suspended machine would.
  */
 const harness = (env: Record<string, string>) =>
   Effect.gen(function* () {
-    const stopped = yield* Ref.make(0);
+    const slept = yield* Ref.make(0);
     const running = yield* Ref.make(false);
+    const completedAt = yield* Ref.make<number | null>(null);
     const frozen = yield* Ref.make<Deferred.Deferred<void> | null>(null);
+    // The clone's process id file, kept in memory: real file reads would race
+    // the test clock.
+    const pidFileContent = yield* Ref.make<string | null>(null);
+    const fileSystem = FileSystem.layerNoop({
+      readFileString: (path) =>
+        Ref.get(pidFileContent).pipe(
+          Effect.flatMap((content) =>
+            content === null || !path.endsWith(IdleShutdown.PREPARING_PID_FILE)
+              ? Effect.fail(
+                  PlatformError.systemError({
+                    _tag: "NotFound",
+                    module: "FileSystem",
+                    method: "readFileString",
+                    pathOrDescriptor: path,
+                  }),
+                )
+              : Effect.succeed(content),
+          ),
+        ),
+    });
     const threads = Layer.succeed(ThreadManagementService.ThreadManagementService, {
       getShellSnapshot: () =>
         Ref.get(frozen).pipe(
           Effect.flatMap((latch) => (latch ? Deferred.await(latch) : Effect.void)),
-          Effect.andThen(Ref.get(running)),
-          Effect.map((isRunning) => ({
-            threads: [{ activeRunId: isRunning ? "run-1" : null }],
+          Effect.andThen(Effect.all([Ref.get(running), Ref.get(completedAt)])),
+          Effect.map(([isRunning, completed]) => ({
+            threads: [
+              {
+                activeRunId: isRunning ? "run-1" : null,
+                latestRunRequestedAt: null,
+                latestRunCompletedAt: completed === null ? null : DateTime.makeUnsafe(completed),
+              },
+            ],
           })),
         ),
     } as unknown as ThreadManagementService.ThreadManagementService["Service"]);
     const context = yield* Layer.build(
-      threads.pipe(Layer.provideMerge(ConfigProvider.layer(ConfigProvider.fromEnv({ env })))),
+      Layer.mergeAll(
+        threads,
+        ServerConfig.layerTest(process.cwd(), { prefix: "t3code-idle-test-" }),
+      ).pipe(
+        Layer.provideMerge(ConfigProvider.layer(ConfigProvider.fromEnv({ env }))),
+        Layer.provideMerge(NodeServices.layer),
+      ),
     );
-    yield* IdleShutdown.make({ sleep: Ref.update(stopped, (count) => count + 1) }).pipe(
-      Effect.provide(context),
-    );
-    return { stopped, running, frozen };
+    const idle = yield* IdleShutdown.make({
+      sleep: Ref.update(slept, (count) => count + 1),
+    }).pipe(Effect.provide(fileSystem), Effect.provide(context));
+    return { slept, running, completedAt, frozen, idle, pidFileContent };
   });
 
+const TWENTY = { T3CODE_SLEEP_WHEN_IDLE_MINUTES: "20" };
+
 describe("IdleShutdown", () => {
-  it.effect("sleeps once no run has been in progress for the configured time", () =>
+  it.effect("sleeps once there has been no agent work for the configured time", () =>
     Effect.gen(function* () {
-      const { stopped } = yield* harness({ T3CODE_SLEEP_WHEN_IDLE_MINUTES: "20" });
+      const { slept } = yield* harness(TWENTY);
       yield* TestClock.adjust("19 minutes");
-      expect(yield* Ref.get(stopped)).toBe(0);
+      expect(yield* Ref.get(slept)).toBe(0);
       yield* TestClock.adjust("2 minutes");
-      expect(yield* Ref.get(stopped)).toBeGreaterThan(0);
+      expect(yield* Ref.get(slept)).toBeGreaterThan(0);
     }).pipe(Effect.scoped),
   );
 
   it.effect("waits while a run is in progress, and counts from when it ends", () =>
     Effect.gen(function* () {
-      const { stopped, running } = yield* harness({ T3CODE_SLEEP_WHEN_IDLE_MINUTES: "20" });
+      const { slept, running } = yield* harness(TWENTY);
       yield* Ref.set(running, true);
       yield* TestClock.adjust("90 minutes");
-      expect(yield* Ref.get(stopped)).toBe(0);
+      expect(yield* Ref.get(slept)).toBe(0);
       yield* Ref.set(running, false);
       yield* TestClock.adjust("19 minutes");
-      expect(yield* Ref.get(stopped)).toBe(0);
+      expect(yield* Ref.get(slept)).toBe(0);
       yield* TestClock.adjust("2 minutes");
-      expect(yield* Ref.get(stopped)).toBeGreaterThan(0);
+      expect(yield* Ref.get(slept)).toBeGreaterThan(0);
     }).pipe(Effect.scoped),
   );
 
-  it.effect("counts waking from a sleep as activity, not the sleep's worth of idleness", () =>
+  it.effect("counts a turn too short for the checks to see running", () =>
     Effect.gen(function* () {
-      const { stopped, frozen } = yield* harness({ T3CODE_SLEEP_WHEN_IDLE_MINUTES: "20" });
+      const { slept, completedAt } = yield* harness(TWENTY);
+      yield* TestClock.adjust("15 minutes");
+      yield* Ref.set(completedAt, yield* Clock.currentTimeMillis);
       yield* TestClock.adjust("19 minutes");
+      expect(yield* Ref.get(slept)).toBe(0);
+      yield* TestClock.adjust("2 minutes");
+      expect(yield* Ref.get(slept)).toBeGreaterThan(0);
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("gives a wake only a short grace, not the whole window", () =>
+    Effect.gen(function* () {
+      const { slept, frozen } = yield* harness(TWENTY);
+      yield* TestClock.adjust("30 minutes");
+      const before = yield* Ref.get(slept);
+      expect(before).toBeGreaterThan(0);
       // The machine sleeps mid-check and its clock jumps when it wakes.
       const latch = yield* Deferred.make<void>();
       yield* Ref.set(frozen, latch);
       yield* TestClock.adjust("30 seconds");
-      yield* TestClock.adjust("40 seconds");
+      yield* TestClock.adjust("3 hours");
       yield* Ref.set(frozen, null);
       yield* Deferred.succeed(latch, undefined);
-      yield* TestClock.adjust("19 minutes");
-      expect(yield* Ref.get(stopped)).toBe(0);
+      yield* TestClock.adjust("1 minute");
+      expect(yield* Ref.get(slept)).toBe(before);
       yield* TestClock.adjust("2 minutes");
-      expect(yield* Ref.get(stopped)).toBeGreaterThan(0);
+      expect(yield* Ref.get(slept)).toBeGreaterThan(before);
     }).pipe(Effect.scoped),
   );
 
-  it.effect("never stops a server that was not asked to", () =>
+  it.effect("stays awake while a repository is being cloned, and ignores a dead clone", () =>
     Effect.gen(function* () {
-      const { stopped } = yield* harness({});
+      const { slept, pidFileContent } = yield* harness(TWENTY);
+      yield* Ref.set(pidFileContent, String(process.pid));
+      yield* TestClock.adjust("90 minutes");
+      expect(yield* Ref.get(slept)).toBe(0);
+      // A process id that is not running: the clone ended without cleaning up.
+      yield* Ref.set(pidFileContent, "2147483646");
+      yield* TestClock.adjust("21 minutes");
+      expect(yield* Ref.get(slept)).toBeGreaterThan(0);
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("sleeps on request, but not while the agent works or a clone runs", () =>
+    Effect.gen(function* () {
+      const { slept, running, pidFileContent, idle } = yield* harness(TWENTY);
+      yield* Ref.set(running, true);
+      expect((yield* idle.sleepNow.pipe(Effect.flip)).reason).toBe("The agent is still working.");
+      yield* Ref.set(running, false);
+      yield* Ref.set(pidFileContent, String(process.pid));
+      expect((yield* idle.sleepNow.pipe(Effect.flip)).reason).toBe(
+        "The repository is still being prepared.",
+      );
+      yield* Ref.set(pidFileContent, null);
+      yield* idle.sleepNow;
+      yield* TestClock.adjust("2 seconds");
+      expect(yield* Ref.get(slept)).toBe(1);
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("never sleeps a server that was not asked to", () =>
+    Effect.gen(function* () {
+      const { slept, idle } = yield* harness({});
       yield* TestClock.adjust("1 day");
-      expect(yield* Ref.get(stopped)).toBe(0);
+      expect(yield* Ref.get(slept)).toBe(0);
+      expect((yield* idle.sleepNow.pipe(Effect.flip))._tag).toBe("SandboxUnavailableError");
     }).pipe(Effect.scoped),
   );
 });

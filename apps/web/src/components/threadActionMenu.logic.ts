@@ -102,8 +102,11 @@ export interface ThreadActionMenuState {
     readonly titleRegeneration: boolean;
   };
   readonly snoozePresets: ReadonlyArray<SnoozePreset>;
-  /** The machine the thread runs in, when it is a sandbox. */
-  readonly sandbox?: { readonly state: SandboxState } | null;
+  /**
+   * The machine the thread runs in, when it is a sandbox. One that wakes on
+   * request (Fly) wakes when its thread is opened, so it offers no Start.
+   */
+  readonly sandbox?: { readonly state: SandboxState; readonly wakesOnRequest: boolean } | null;
 }
 
 const SANDBOX_STATE_LABELS: Record<SandboxState, string> = {
@@ -234,17 +237,29 @@ export function buildThreadActionMenuItems(
       ? [
           {
             id: "sandbox" as const,
-            label: `Sandbox (${SANDBOX_STATE_LABELS[state.sandbox.state]})`,
+            label: `Sandbox (${
+              state.sandbox.wakesOnRequest && state.sandbox.state === "stopped"
+                ? "asleep"
+                : SANDBOX_STATE_LABELS[state.sandbox.state]
+            })`,
             icon: "box",
             children: [
-              state.sandbox.state === "running"
-                ? { id: "sandbox:stop" as const, label: "Stop sandbox" }
-                : { id: "sandbox:start" as const, label: "Start sandbox" },
+              ...(state.sandbox.wakesOnRequest
+                ? state.sandbox.state === "running"
+                  ? [{ id: "sandbox:stop" as const, label: "Put to sleep" }]
+                  : []
+                : [
+                    state.sandbox.state === "running"
+                      ? { id: "sandbox:stop" as const, label: "Stop sandbox" }
+                      : { id: "sandbox:start" as const, label: "Start sandbox" },
+                  ]),
               {
                 id: "sandbox:delete" as const,
                 label: "Delete sandbox…",
                 destructive: true,
-                separatorBefore: true,
+                separatorBefore: !(
+                  state.sandbox.wakesOnRequest && state.sandbox.state !== "running"
+                ),
               },
             ],
           },

@@ -37,7 +37,11 @@ export interface SandboxMachine {
    * null for sandboxes made before it was recorded.
    */
   readonly environmentId: EnvironmentId | null;
-  /** Where clients reach the sandbox's T3 server, while it runs. */
+  /**
+   * Where clients reach the sandbox's T3 server: always for Fly, where the
+   * address is fixed and a request wakes a sleeping sandbox; only while it
+   * runs for Docker, which publishes it on a new port each start.
+   */
   readonly httpBaseUrl: string | null;
   /** For an unclaimed spare, the settings fingerprint it was made with; null otherwise. */
   readonly spare: string | null;
@@ -84,6 +88,12 @@ export interface SandboxDriver {
   readonly claim: (id: SandboxId) => Effect.Effect<void, SandboxError>;
   /** Deletes the machine and its files. */
   readonly remove: (id: SandboxId) => Effect.Effect<void, SandboxError>;
+  /**
+   * Deletes the machine and its files only if it is not running, as one step
+   * the backend enforces, so a sandbox woken a moment before is never deleted.
+   * Succeeds with whether it was deleted.
+   */
+  readonly removeIfStopped: (id: SandboxId) => Effect.Effect<boolean, SandboxError>;
   /** Runs a command as the image's user in a running machine and returns its standard output. */
   readonly exec: (
     id: SandboxId,

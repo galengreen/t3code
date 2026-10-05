@@ -101,9 +101,15 @@ const fakeDocker = () => {
         container.finishedAt = stopTime;
         return output("");
       }
-      case "rm":
-        containers.delete(rest.at(-1)!);
+      case "rm": {
+        const name = rest.at(-1)!;
+        // Like Docker, refuse to remove a running container without --force.
+        if (!rest.includes("--force") && containers.get(name)?.status === "running") {
+          return output("", 1, "cannot remove a running container");
+        }
+        containers.delete(name);
         return output("");
+      }
       case "volume":
         volumes.delete(rest.at(-1)!);
         return output("");

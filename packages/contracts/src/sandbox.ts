@@ -75,15 +75,18 @@ export type SandboxFlyAccount = typeof SandboxFlyAccount.Type;
 export class SandboxUnavailableError extends Schema.TaggedError<SandboxUnavailableError>()(
   "SandboxUnavailableError",
   { reason: Schema.String },
+  { httpApiStatus: 503 },
 ) {
+  /** Reasons are written as whole sentences for the user. */
   override get message(): string {
-    return `Sandboxes are unavailable: ${this.reason}`;
+    return this.reason;
   }
 }
 
 export class SandboxNotFoundError extends Schema.TaggedError<SandboxNotFoundError>()(
   "SandboxNotFoundError",
   { id: Schema.String },
+  { httpApiStatus: 404 },
 ) {
   override get message(): string {
     return `Sandbox ${this.id} was not found.`;
@@ -93,6 +96,7 @@ export class SandboxNotFoundError extends Schema.TaggedError<SandboxNotFoundErro
 export class SandboxNotRunningError extends Schema.TaggedError<SandboxNotRunningError>()(
   "SandboxNotRunningError",
   { id: Schema.String },
+  { httpApiStatus: 409 },
 ) {
   override get message(): string {
     return `Sandbox ${this.id} is stopped. Start it first.`;
@@ -117,6 +121,7 @@ export class SandboxOperationError extends Schema.TaggedError<SandboxOperationEr
     id: Schema.optional(Schema.String),
     cause: Schema.optional(Schema.Defect()),
   },
+  { httpApiStatus: 502 },
 ) {
   override get message(): string {
     if (this.operation === "account") return "Could not look up the Fly account.";

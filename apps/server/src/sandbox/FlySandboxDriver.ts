@@ -4,7 +4,9 @@
  *
  * Each sandbox is its own Fly app, `t3-sbx-<id>`, holding one machine, so it
  * gets its own `https://<app>.fly.dev` address and deleting the app removes
- * everything it owns. The machine keeps its root filesystem across stops, so
+ * everything it owns. Fly's proxy wakes a sleeping machine when a request
+ * arrives, so the address is always given and connecting is how clients wake
+ * a sandbox; the machine decides for itself when to sleep. The machine keeps its root filesystem across stops, so
  * the image's home directory and everything written to it persist like a
  * Docker sandbox's volume. Sensitive variables become Fly app secrets, which
  * Fly encrypts and injects as environment variables; plain ones go into the
@@ -141,7 +143,7 @@ const toMachine = (app: string, machine: MachineSummary): SandboxMachine | null 
     state,
     createdAt: machine.created_at ?? "",
     stoppedAt: state === "stopped" ? (machine.updated_at ?? null) : null,
-    httpBaseUrl: state === "running" ? `https://${app}.fly.dev` : null,
+    httpBaseUrl: `https://${app}.fly.dev`,
     spare: machine.config?.metadata?.[SPARE_METADATA] ?? null,
   };
 };
@@ -410,9 +412,9 @@ export const make = Effect.gen(function* () {
             {
               protocol: "tcp",
               internal_port: SANDBOX_PORT,
-              // A sleeping sandbox wakes when asked through the host, not when
-              // a client that is still open reconnects to it.
-              autostart: false,
+              // A request wakes a sleeping sandbox; clients connect only when
+              // they need it, and the sandbox sleeps itself when idle.
+              autostart: true,
               autostop: "off",
               ports: [
                 { port: 443, handlers: ["tls", "http"] },
@@ -509,6 +511,32 @@ export const make = Effect.gen(function* () {
     if (response.status !== 404) yield* expectOk(response, "remove", id);
   });
 
+  const removeIfStopped: SandboxDriver["removeIfStopped"] = Effect.fn(
+    "FlySandboxDriver.removeIfStopped",
+  )(function* (id) {
+    const fly = yield* requireConfigured;
+    const machine = yield* machineOf(fly.apiToken, id, "remove");
+    // Without `force`, Fly refuses to destroy a started machine, so a wake
+    // that lands after this sandbox was found idle keeps it.
+    const destroyed = yield* call(
+      fly.apiToken,
+      "DELETE",
+      `/v1/apps/${appName(id)}/machines/${machine.id}`,
+      "remove",
+      id,
+    );
+    if (destroyed.status < 200 || destroyed.status >= 300) {
+      yield* Effect.logInfo("Fly kept a sandbox that is no longer idle", {
+        id,
+        status: destroyed.status,
+      });
+      return false;
+    }
+    // Only now that the machine is gone does the app go, with its IPs.
+    yield* remove(id);
+    return true;
+  });
+
   const exec: SandboxDriver["exec"] = Effect.fn("FlySandboxDriver.exec")(
     function* (id, command, operation) {
       const fly = yield* requireConfigured;
@@ -535,5 +563,16 @@ export const make = Effect.gen(function* () {
     },
   );
 
-  return { list, find, create, start, stop, park, claim, remove, exec } satisfies SandboxDriver;
+  return {
+    list,
+    find,
+    create,
+    start,
+    stop,
+    park,
+    claim,
+    remove,
+    removeIfStopped,
+    exec,
+  } satisfies SandboxDriver;
 });

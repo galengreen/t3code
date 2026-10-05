@@ -237,15 +237,16 @@ const make = Effect.gen(function* () {
   });
 
   /**
-   * A machine as clients see it. Its address is only given once its server
-   * answers, so nothing pairs with a sandbox that is still booting. Sandboxes
-   * record their environment when created; older ones report it when asked.
+   * A machine as clients see it. A Docker sandbox's address is only given once
+   * its server answers, so nothing pairs with one that is still booting. A Fly
+   * sandbox is never contacted here: a request would wake a sleeping one, and
+   * its address and environment are known from Fly alone.
    */
   const summarize = (
     backend: SandboxBackend,
     machine: SandboxMachine,
   ): Effect.Effect<SandboxSummary> =>
-    machine.httpBaseUrl === null
+    machine.httpBaseUrl === null || backend === "fly"
       ? Effect.succeed({ ...machine, backend })
       : httpClient.get(`${machine.httpBaseUrl}/.well-known/t3/environment`).pipe(
           Effect.flatMap((response) => response.json),
@@ -486,7 +487,17 @@ const make = Effect.gen(function* () {
   const pair: SandboxService["Service"]["pair"] = Effect.fn("SandboxService.pair")(function* ({
     id,
   }) {
-    const { backend, machine } = yield* locate(id, "pair");
+    const located = yield* locate(id, "pair");
+    const { backend } = located;
+    let machine = located.machine;
+    if (machine.state !== "running") {
+      // A Fly sandbox is woken to be paired (a device seeing it for the first
+      // time); a stopped Docker one has to be started by the user.
+      if (backend !== "fly") return yield* new SandboxNotRunningError({ id });
+      yield* drivers[backend].start(id);
+      yield* waitUntilReady(machine, "pair");
+      machine = yield* drivers[backend].find(id, "pair");
+    }
     if (machine.httpBaseUrl === null) return yield* new SandboxNotRunningError({ id });
     const stdout = yield* drivers[backend].exec(
       id,
@@ -530,7 +541,9 @@ const make = Effect.gen(function* () {
         if (machine.spare !== null) continue;
         const stoppedAt = machine.stoppedAt === null ? NaN : Date.parse(machine.stoppedAt);
         if (machine.state !== "stopped" || !(stoppedAt < cutoff)) continue;
-        yield* drivers[backend].remove(machine.id);
+        // Something may wake it after this list was read; the backend refuses
+        // to delete a running sandbox, and then it is kept.
+        if (!(yield* drivers[backend].removeIfStopped(machine.id))) continue;
         yield* recordRemoved(machine.environmentId);
         yield* Effect.logInfo("Deleted a long-stopped sandbox", {
           id: machine.id,
