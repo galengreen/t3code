@@ -26,9 +26,11 @@ function useNowWhile(active: boolean): number {
 function stageLabel(id: SandboxLaunchStageId, repositoryName: string | null): string {
   switch (id) {
     case "create":
-      return repositoryName ? `Start sandbox and clone ${repositoryName}` : "Start sandbox";
+      return "Start sandbox";
     case "connect":
       return "Connect";
+    case "clone":
+      return repositoryName ? `Clone ${repositoryName}` : "Clone repository";
     case "send":
       return "Send message";
   }

@@ -706,6 +706,15 @@ export const SETTINGS_SEARCH_ITEMS = [
     scope: "environment-defaults",
   },
   {
+    id: "sandbox-keep-ready",
+    title: "Keep a sandbox ready",
+    to: "/settings/integrations",
+    targetId: "sandboxes",
+    searchTerms: ["sandbox spare warm pool fast start prewarm ready"],
+    environmentOnly: true,
+    scope: "environment-defaults",
+  },
+  {
     id: "sandbox-delete",
     title: "Delete stopped sandboxes",
     to: "/settings/integrations",

@@ -4,9 +4,10 @@
  * owns everything that is the same wherever a sandbox runs: settings, ids,
  * readiness, environment variables, and pairing.
  *
- * A driver's own records are the source of truth (container labels for
- * Docker, machine metadata for Fly), so the host persists nothing about a
- * sandbox. Every backend's driver is live at once, so sandboxes made before
+ * A driver's own records are the source of truth (container labels and names
+ * for Docker, machine metadata for Fly), so the host persists nothing about a
+ * sandbox. That includes spares: sandboxes booted ahead of time and parked
+ * until a create claims one. Every backend's driver is live at once, so sandboxes made before
  * the user switched backends can still be listed, stopped, and removed.
  */
 import type {
@@ -38,6 +39,8 @@ export interface SandboxMachine {
   readonly environmentId: EnvironmentId | null;
   /** Where clients reach the sandbox's T3 server, while it runs. */
   readonly httpBaseUrl: string | null;
+  /** For an unclaimed spare, the settings fingerprint it was made with; null otherwise. */
+  readonly spare: string | null;
 }
 
 export interface SandboxVariable {
@@ -55,6 +58,8 @@ export interface SandboxMachineSpec {
   readonly size: SandboxSize;
   /** Later entries win when names repeat. */
   readonly environment: ReadonlyArray<SandboxVariable>;
+  /** Marks the machine as a spare made with this settings fingerprint. */
+  readonly spare: string | null;
 }
 
 export interface SandboxDriver {
@@ -70,6 +75,13 @@ export interface SandboxDriver {
   readonly start: (id: SandboxId) => Effect.Effect<void, SandboxError>;
   /** Stops the machine, keeping its files. */
   readonly stop: (id: SandboxId) => Effect.Effect<void, SandboxError>;
+  /**
+   * Puts a running spare to sleep the way it wakes fastest, keeping its
+   * memory where that is cheap. `start` wakes it.
+   */
+  readonly park: (id: SandboxId) => Effect.Effect<void, SandboxError>;
+  /** Turns a spare into an ordinary sandbox. */
+  readonly claim: (id: SandboxId) => Effect.Effect<void, SandboxError>;
   /** Deletes the machine and its files. */
   readonly remove: (id: SandboxId) => Effect.Effect<void, SandboxError>;
   /** Runs a command as the image's user in a running machine and returns its standard output. */

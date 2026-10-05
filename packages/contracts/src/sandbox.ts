@@ -40,8 +40,7 @@ export const SandboxSummary = Schema.Struct({
 export type SandboxSummary = typeof SandboxSummary.Type;
 
 export const SandboxCreateInput = Schema.Struct({
-  label: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(80))),
-  /** Cloned into the sandbox on first start. */
+  /** Cloned into the sandbox's `~/work` and added as a project once it answers. */
   repositoryUrl: Schema.optional(
     TrimmedNonEmptyString.check(Schema.isPattern(/^(https:\/\/|git@)[^\s]+$/)),
   ),
@@ -103,13 +102,25 @@ export class SandboxNotRunningError extends Schema.TaggedError<SandboxNotRunning
 export class SandboxOperationError extends Schema.TaggedError<SandboxOperationError>()(
   "SandboxOperationError",
   {
-    operation: Schema.Literals(["list", "create", "start", "stop", "remove", "pair", "account"]),
+    operation: Schema.Literals([
+      "list",
+      "create",
+      "start",
+      "stop",
+      "remove",
+      "pair",
+      "account",
+      "park",
+      "claim",
+      "clone",
+    ]),
     id: Schema.optional(Schema.String),
     cause: Schema.optional(Schema.Defect()),
   },
 ) {
   override get message(): string {
     if (this.operation === "account") return "Could not look up the Fly account.";
+    if (this.operation === "clone") return "Could not clone the repository into the sandbox.";
     return this.id === undefined
       ? `Could not ${this.operation} sandboxes.`
       : `Could not ${this.operation} sandbox ${this.id}.`;

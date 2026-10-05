@@ -37,6 +37,8 @@ const fakeDocker = () => {
     stderrInvalidUtf8: false,
   });
   const inspectJson = (name: string, container: FakeContainer) => ({
+    Id: name,
+    Name: `/${name}`,
     Created: "2026-10-03T00:00:00Z",
     Config: { Image: container.image, Labels: container.labels },
     State: { Status: container.status, FinishedAt: container.finishedAt ?? "0001-01-01T00:00:00Z" },
@@ -46,7 +48,6 @@ const fakeDocker = () => {
           container.status === "running" ? [{ HostIp: "127.0.0.1", HostPort: "49999" }] : null,
       },
     },
-    Name: name,
   });
   const run = (args: ReadonlyArray<string>, env?: NodeJS.ProcessEnv) => {
     calls.push([...args]);
@@ -55,10 +56,16 @@ const fakeDocker = () => {
     switch (command) {
       case "ps": {
         const [key, value] = rest[rest.indexOf("--filter") + 1]!.replace(/^label=/, "").split("=");
-        const ids = [...containers.entries()]
-          .filter(([, container]) => container.labels[key!] === value)
-          .map(([name]) => name);
-        return output(ids.map((id) => `${id}\n`).join(""));
+        const matches = [...containers.entries()].filter(
+          ([, container]) => container.labels[key!] === value,
+        );
+        return output(
+          matches
+            .map(([name, container]) =>
+              rest.includes("--format") ? `${name} ${container.status}\n` : `${name}\n`,
+            )
+            .join(""),
+        );
       }
       case "inspect":
         return output(JSON.stringify(rest.map((name) => inspectJson(name, containers.get(name)!))));
@@ -76,8 +83,18 @@ const fakeDocker = () => {
         return output(`${name}\n`);
       }
       case "start":
+      case "unpause":
         containers.get(rest[0]!)!.status = "running";
         return output("");
+      case "pause":
+        containers.get(rest[0]!)!.status = "paused";
+        return output("");
+      case "rename": {
+        const [from, to] = rest;
+        containers.set(to!, containers.get(from!)!);
+        containers.delete(from!);
+        return output("");
+      }
       case "stop": {
         const container = containers.get(rest.at(-1)!)!;
         container.status = "exited";
@@ -92,7 +109,13 @@ const fakeDocker = () => {
         return output("");
       case "exec":
         return output(
-          JSON.stringify({ id: "x", credential: "PAIR1234", expiresAt: "2026-10-03T01:00:00Z" }),
+          rest.includes("t3-sandbox-clone")
+            ? ""
+            : JSON.stringify({
+                id: "x",
+                credential: "PAIR1234",
+                expiresAt: "2026-10-03T01:00:00Z",
+              }),
         );
       default:
         return output("", 1, `unexpected docker ${command}`);
@@ -114,6 +137,7 @@ const serviceLayer = (
   docker: ReturnType<typeof fakeDocker>,
   enableSandboxes = true,
   serving: () => boolean = () => true,
+  sandboxKeepReady = false,
 ) =>
   SandboxService.layer.pipe(
     Layer.provide(SandboxDrivers.layer),
@@ -122,6 +146,7 @@ const serviceLayer = (
         enableSandboxes,
         sandboxImage: "sandbox:test",
         sandboxPublishHost: "100.64.0.7",
+        sandboxKeepReady,
         sandboxEnvironment: [
           { name: "CLAUDE_CODE_OAUTH_TOKEN", value: "sk-ant-oat-secret", sensitive: true },
           { name: "GIT_AUTHOR_NAME", value: "Sandbox", sensitive: false },
@@ -156,41 +181,102 @@ const serviceLayer = (
   );
 
 describe("SandboxService", () => {
-  it.effect("creates a labelled container on host loopback and waits for its server", () => {
+  it.effect(
+    "creates a labelled container on host loopback and clones into it once it answers",
+    () => {
+      const docker = fakeDocker();
+      return Effect.gen(function* () {
+        const sandboxes = yield* SandboxService.SandboxService;
+        const created = yield* sandboxes.create({
+          repositoryUrl: "https://github.com/example/app.git",
+        });
+        expect(created).toMatchObject({
+          label: `Sandbox ${created.id.slice(0, 6)}`,
+          image: "sandbox:test",
+          state: "running",
+          httpBaseUrl: "http://100.64.0.7:49999",
+        });
+        expect(created.id).toMatch(/^[0-9a-f]{12}$/);
+        // The host chooses the environment id and the image adopts it, so the
+        // sandbox can be matched to its threads even while it is stopped.
+        expect(created.environmentId).toMatch(/^[0-9a-f-]{36}$/);
+        const run = docker.calls.find((args) => args[0] === "run")!;
+        expect(run).toEqual(
+          expect.arrayContaining([
+            "--publish",
+            "100.64.0.7::7777/tcp",
+            `t3code.sandbox.id=${created.id}`,
+            `t3-sandbox-${created.id}-home:/home/dev`,
+            `T3_SANDBOX_LABEL=Sandbox ${created.id.slice(0, 6)}`,
+            `T3_ENVIRONMENT_ID=${created.environmentId}`,
+            `t3code.sandbox.environment=${created.environmentId}`,
+          ]),
+        );
+        expect(docker.calls.at(-1)).toEqual([
+          "exec",
+          "--user",
+          "dev",
+          `t3-sandbox-${created.id}`,
+          "t3-sandbox-clone",
+          "https://github.com/example/app.git",
+        ]);
+        expect((yield* sandboxes.list).map((sandbox) => sandbox.id)).toEqual([created.id]);
+      }).pipe(Effect.provide(serviceLayer(docker)));
+    },
+  );
+
+  it.effect("keeps one spare parked and hands it to the next create", () => {
     const docker = fakeDocker();
     return Effect.gen(function* () {
       const sandboxes = yield* SandboxService.SandboxService;
+      yield* sandboxes.keepSpareReady;
+      const [spareName, spare] = [...docker.containers][0]!;
+      expect(spareName).toMatch(/^t3-spare-/);
+      expect(spare!.status).toBe("paused");
+      // Clients never see a spare.
+      expect(yield* sandboxes.list).toEqual([]);
+
       const created = yield* sandboxes.create({
-        label: "Fix login",
         repositoryUrl: "https://github.com/example/app.git",
       });
-      expect(created).toMatchObject({
-        label: "Fix login",
-        image: "sandbox:test",
-        state: "running",
-        httpBaseUrl: "http://100.64.0.7:49999",
-      });
-      expect(created.id).toMatch(/^[0-9a-f]{12}$/);
-      // The host chooses the environment id and the image adopts it, so the
-      // sandbox can be matched to its threads even while it is stopped.
-      expect(created.environmentId).toMatch(/^[0-9a-f-]{36}$/);
-      const run = docker.calls.find((args) => args[0] === "run")!;
-      expect(run).toEqual(
-        expect.arrayContaining([
-          "--publish",
-          "100.64.0.7::7777/tcp",
-          "--env",
-          "REPO_URL=https://github.com/example/app.git",
-          `t3code.sandbox.id=${created.id}`,
-          `t3-sandbox-${created.id}-home:/home/dev`,
-          "T3_SANDBOX_LABEL=Fix login",
-          `T3_ENVIRONMENT_ID=${created.environmentId}`,
-          `t3code.sandbox.environment=${created.environmentId}`,
-        ]),
-      );
+      expect(spareName).toBe(`t3-spare-${created.id}`);
+      expect(docker.containers.get(`t3-sandbox-${created.id}`)?.status).toBe("running");
+      expect(created.state).toBe("running");
+
+      // The claim leaves a new spare in its place.
+      yield* sandboxes.keepSpareReady;
+      const spares = [...docker.containers.keys()].filter((name) => name.startsWith("t3-spare-"));
+      expect(spares).toHaveLength(1);
+      expect(docker.containers.get(spares[0]!)?.status).toBe("paused");
       expect((yield* sandboxes.list).map((sandbox) => sandbox.id)).toEqual([created.id]);
-    }).pipe(Effect.provide(serviceLayer(docker)));
+    }).pipe(Effect.provide(serviceLayer(docker, true, () => true, true)));
   });
+
+  it.effect(
+    "replaces the spare when sandbox settings change, and deletes it when turned off",
+    () => {
+      const docker = fakeDocker();
+      return Effect.gen(function* () {
+        const sandboxes = yield* SandboxService.SandboxService;
+        const settings = yield* ServerSettings.ServerSettingsService;
+        const spares = () => [...docker.containers.keys()];
+        yield* sandboxes.keepSpareReady;
+        const [first] = spares();
+        yield* sandboxes.keepSpareReady;
+        expect(spares()).toEqual([first]);
+
+        yield* settings.updateSettings({ sandboxSize: "medium" });
+        yield* sandboxes.keepSpareReady;
+        expect(spares()).toHaveLength(1);
+        expect(spares()[0]).not.toBe(first);
+
+        yield* settings.updateSettings({ sandboxKeepReady: false });
+        yield* sandboxes.keepSpareReady;
+        expect(spares()).toEqual([]);
+        expect(docker.volumes.size).toBe(0);
+      }).pipe(Effect.provide(serviceLayer(docker, true, () => true, true)));
+    },
+  );
 
   it.effect(
     "starts sandboxes with the host's variables, keeping secrets off the command line",
@@ -198,7 +284,7 @@ describe("SandboxService", () => {
       const docker = fakeDocker();
       return Effect.gen(function* () {
         const sandboxes = yield* SandboxService.SandboxService;
-        yield* sandboxes.create({ label: "Fix login" });
+        yield* sandboxes.create({});
         const runIndex = docker.calls.findIndex((args) => args[0] === "run");
         const run = docker.calls[runIndex]!;
         expect(run).toEqual(
@@ -278,9 +364,9 @@ describe("SandboxService", () => {
     const docker = fakeDocker();
     return Effect.gen(function* () {
       const sandboxes = yield* SandboxService.SandboxService;
-      const old = yield* sandboxes.create({ label: "old" });
-      const recent = yield* sandboxes.create({ label: "recent" });
-      const running = yield* sandboxes.create({ label: "running" });
+      const old = yield* sandboxes.create({});
+      const recent = yield* sandboxes.create({});
+      const running = yield* sandboxes.create({});
       docker.stopAt("2026-10-01T00:00:00Z");
       yield* sandboxes.stop({ id: old.id });
       docker.stopAt("2026-10-18T00:00:00Z");
@@ -288,10 +374,9 @@ describe("SandboxService", () => {
       yield* TestClock.setTime(Date.parse("2026-10-20T00:00:00Z"));
 
       expect(yield* sandboxes.pruneStopped).toEqual([old.id]);
-      expect((yield* sandboxes.list).map((sandbox) => sandbox.label).toSorted()).toEqual([
-        "recent",
-        "running",
-      ]);
+      expect((yield* sandboxes.list).map((sandbox) => sandbox.id).toSorted()).toEqual(
+        [recent.id, running.id].toSorted(),
+      );
       expect(running.state).toBe("running");
     }).pipe(Effect.provide(serviceLayer(docker)));
   });

@@ -9,6 +9,10 @@
  * directly. Docker picks a new host port each time a sandbox starts, so its
  * address is not stable across stop and start.
  *
+ * A spare is named `t3-spare-<id>` and carries the settings fingerprint it was
+ * made with; claiming renames it to `t3-sandbox-<id>`, since labels are fixed
+ * at creation. Parking pauses it, which keeps its booted server in memory.
+ *
  * Environment variables are fixed when the container is created. Sensitive
  * values reach `docker run` through its own environment rather than its
  * arguments, so they never appear in the host's process list.
@@ -38,6 +42,7 @@ const SANDBOX_LABEL = "t3code.sandbox";
 const SANDBOX_ID_LABEL = "t3code.sandbox.id";
 const SANDBOX_NAME_LABEL = "t3code.sandbox.label";
 const SANDBOX_ENVIRONMENT_LABEL = "t3code.sandbox.environment";
+const SANDBOX_SPARE_LABEL = "t3code.sandbox.spare";
 const SANDBOX_PORT = "7777/tcp";
 
 /** Docker has no dedicated CPUs, so large gets more of them instead. */
@@ -48,9 +53,12 @@ const SIZE_LIMITS: Record<SandboxSize, { readonly cpus: string; readonly memory:
 };
 
 const containerName = (id: SandboxId) => `t3-sandbox-${id}`;
+const spareName = (id: SandboxId) => `t3-spare-${id}`;
 const volumeName = (id: SandboxId) => `t3-sandbox-${id}-home`;
 
 const DockerContainer = Schema.Struct({
+  Id: Schema.String,
+  Name: Schema.String,
   Created: Schema.String,
   Config: Schema.Struct({
     Image: Schema.String,
@@ -108,6 +116,7 @@ const toMachine = (
         ? null
         : container.State.FinishedAt,
     httpBaseUrl: state === "running" && port ? `http://${urlHost(publishHost)}:${port}` : null,
+    spare: container.Name === `/${spareName(id)}` ? (labels[SANDBOX_SPARE_LABEL] ?? "") : null,
   };
 };
 
@@ -178,10 +187,33 @@ export const make = Effect.gen(function* () {
       ),
     );
 
+  /** The sandbox's container and its Docker status, whichever name it has now. */
+  const containerOf = (id: SandboxId, operation: SandboxOperation) =>
+    docker(
+      [
+        "ps",
+        "--all",
+        "--no-trunc",
+        "--filter",
+        `label=${SANDBOX_ID_LABEL}=${id}`,
+        "--format",
+        "{{.ID}} {{.State}}",
+      ],
+      operation,
+      id,
+    ).pipe(
+      Effect.flatMap((stdout) => {
+        const [container, status = ""] = stdout.trim().split(/\s+/);
+        return container
+          ? Effect.succeed({ container, status })
+          : Effect.fail(new SandboxNotFoundError({ id }));
+      }),
+    );
+
   return {
     list: inspect(`${SANDBOX_LABEL}=1`, "list"),
     find,
-    create: ({ id, environmentId, label, image, size, environment }) =>
+    create: ({ id, environmentId, label, image, size, environment, spare }) =>
       Effect.gen(function* () {
         const host = yield* publishHost;
         const env = environmentArgs(environment);
@@ -189,8 +221,11 @@ export const make = Effect.gen(function* () {
           [
             "run",
             "--detach",
+            // The server runs as the main process; an init reaps the agents' orphans.
+            "--init",
             "--name",
-            containerName(id),
+            spare === null ? containerName(id) : spareName(id),
+            ...(spare === null ? [] : ["--label", `${SANDBOX_SPARE_LABEL}=${spare}`]),
             "--label",
             `${SANDBOX_LABEL}=1`,
             "--label",
@@ -218,15 +253,42 @@ export const make = Effect.gen(function* () {
           env.secrets,
         );
       }),
-    start: (id) => docker(["start", containerName(id)], "start", id).pipe(Effect.asVoid),
+    start: (id) =>
+      containerOf(id, "start").pipe(
+        Effect.flatMap(({ container, status }) =>
+          docker([status === "paused" ? "unpause" : "start", container], "start", id),
+        ),
+        Effect.asVoid,
+      ),
     stop: (id) =>
-      docker(["stop", "--time", "10", containerName(id)], "stop", id).pipe(Effect.asVoid),
+      containerOf(id, "stop").pipe(
+        Effect.flatMap(({ container, status }) =>
+          // A paused container cannot stop until it runs again.
+          (status === "paused" ? docker(["unpause", container], "stop", id) : Effect.void).pipe(
+            Effect.andThen(docker(["stop", "--time", "10", container], "stop", id)),
+          ),
+        ),
+        Effect.asVoid,
+      ),
+    park: (id) =>
+      containerOf(id, "park").pipe(
+        Effect.flatMap(({ container }) => docker(["pause", container], "park", id)),
+        Effect.asVoid,
+      ),
+    claim: (id) =>
+      docker(["rename", spareName(id), containerName(id)], "claim", id).pipe(Effect.asVoid),
     remove: (id) =>
-      docker(["rm", "--force", containerName(id)], "remove", id).pipe(
+      containerOf(id, "remove").pipe(
+        Effect.flatMap(({ container }) => docker(["rm", "--force", container], "remove", id)),
+        Effect.catchTag("SandboxNotFoundError", () => Effect.void),
         Effect.andThen(docker(["volume", "rm", "--force", volumeName(id)], "remove", id)),
         Effect.asVoid,
       ),
     exec: (id, command, operation) =>
-      docker(["exec", containerName(id), ...command], operation, id),
+      containerOf(id, operation).pipe(
+        Effect.flatMap(({ container }) =>
+          docker(["exec", "--user", "dev", container, ...command], operation, id),
+        ),
+      ),
   } satisfies SandboxDriver;
 });

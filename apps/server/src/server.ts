@@ -1035,6 +1035,7 @@ const makeServerLayer = Layer.unwrap(
       HeapSnapshot.layer,
       IdleShutdown.layer,
       SandboxService.pruneLayer,
+      SandboxService.sparesLayer,
     );
 
     return serverApplicationLayer.pipe(

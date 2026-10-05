@@ -17,7 +17,9 @@ interface FakeApp {
 }
 
 /** A tiny Machines API that keeps apps in memory and records each call. */
-const fakeFly = (options: { failMachineCreate?: boolean; waitTimeouts?: number } = {}) => {
+const fakeFly = (
+  options: { failMachineCreate?: boolean; waitTimeouts?: number; refuseSuspend?: boolean } = {},
+) => {
   let waitTimeouts = options.waitTimeouts ?? 0;
   const apps = new Map<string, FakeApp>();
   const calls: Array<{ method: string; path: string; body: unknown; authorization: string }> = [];
@@ -40,7 +42,7 @@ const fakeFly = (options: { failMachineCreate?: boolean; waitTimeouts?: number }
           request,
           json === undefined ? new Response(null, { status }) : Response.json(json, { status }),
         );
-      const [, , resource, app, sub, machineId, action] = path.split("/");
+      const [, , resource, app, sub, machineId, action, key] = path.split("/");
       if (resource === "apps" && app === undefined && request.method === "POST") {
         apps.set(body.name, { secrets: {}, ips: [], machines: [] });
         return reply(201, { id: body.name });
@@ -87,6 +89,14 @@ const fakeFly = (options: { failMachineCreate?: boolean; waitTimeouts?: number }
         }
         return reply(200, { ok: true });
       }
+      if (action === "suspend") {
+        if (options.refuseSuspend) return reply(422, { error: "memory too large to suspend" });
+        machine.state = "suspended";
+      }
+      if (action === "metadata" && request.method === "DELETE") {
+        const metadata = machine.config.metadata as Record<string, string>;
+        delete metadata[key!];
+      }
       if (action === "stop") machine.state = "stopped";
       if (action === "start") machine.state = "started";
       if (action === "exec") {
@@ -120,8 +130,9 @@ const spec = {
   size: "small" as const,
   environment: [
     { name: "CLAUDE_CODE_OAUTH_TOKEN", value: "sk-ant-oat-secret", sensitive: true },
-    { name: "REPO_URL", value: "https://github.com/example/app.git", sensitive: false },
+    { name: "T3_HOST", value: "0.0.0.0", sensitive: false },
   ],
+  spare: null,
 };
 
 describe("FlySandboxDriver", () => {
@@ -139,7 +150,7 @@ describe("FlySandboxDriver", () => {
           min_secrets_version: 3,
           config: {
             image: spec.image,
-            env: { REPO_URL: "https://github.com/example/app.git" },
+            env: { T3_HOST: "0.0.0.0" },
             guest: { cpu_kind: "shared", cpus: 2, memory_mb: 2048 },
             restart: { policy: "no" },
             services: [expect.objectContaining({ autostart: false, autostop: "off" })],
@@ -158,8 +169,38 @@ describe("FlySandboxDriver", () => {
             stoppedAt: null,
             environmentId: spec.environmentId,
             httpBaseUrl: "https://t3-sbx-abc123def456.fly.dev",
+            spare: null,
           },
         ]);
+      }),
+    );
+  });
+
+  it.effect("parks a spare by suspending it, and claiming it keeps the machine as it is", () => {
+    const fly = fakeFly();
+    return run(fly, (driver) =>
+      Effect.gen(function* () {
+        yield* driver.create({ ...spec, spare: "fingerprint" });
+        yield* driver.park(spec.id);
+        const [parked] = yield* driver.list;
+        expect(parked).toMatchObject({ state: "stopped", spare: "fingerprint" });
+        expect(fly.apps.get("t3-sbx-abc123def456")!.machines[0]!.state).toBe("suspended");
+
+        yield* driver.claim(spec.id);
+        expect((yield* driver.list)[0]?.spare).toBeNull();
+        yield* driver.start(spec.id);
+        expect((yield* driver.list)[0]?.state).toBe("running");
+      }),
+    );
+  });
+
+  it.effect("stops a spare that Fly will not suspend", () => {
+    const fly = fakeFly({ refuseSuspend: true });
+    return run(fly, (driver) =>
+      Effect.gen(function* () {
+        yield* driver.create({ ...spec, spare: "fingerprint" });
+        yield* driver.park(spec.id);
+        expect(fly.apps.get("t3-sbx-abc123def456")!.machines[0]!.state).toBe("stopped");
       }),
     );
   });

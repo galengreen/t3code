@@ -11,6 +11,11 @@
  * machine config. The app list is the record: apps are found by name prefix.
  *
  * Fly runs `exec` as root, so commands are run as the image's `dev` user.
+ *
+ * A spare carries `t3code_sandbox_spare` metadata, which claiming deletes; Fly
+ * changes metadata without restarting the machine. Parking suspends it, which
+ * keeps memory and so the booted server, and resumes in about a second. Fly
+ * only suspends machines of up to 2 GB, so larger ones are stopped instead.
  */
 import {
   EnvironmentId,
@@ -32,6 +37,7 @@ import type { SandboxDriver, SandboxMachine, SandboxOperation } from "./SandboxD
 
 const API_BASE = "https://api.machines.dev";
 const APP_PREFIX = "t3-sbx-";
+const SPARE_METADATA = "t3code_sandbox_spare";
 const SANDBOX_PORT = 7777;
 /** The first start in a region pulls the image, which can take minutes. */
 const START_TIMEOUT_SECONDS = 300;
@@ -136,6 +142,7 @@ const toMachine = (app: string, machine: MachineSummary): SandboxMachine | null 
     createdAt: machine.created_at ?? "",
     stoppedAt: state === "stopped" ? (machine.updated_at ?? null) : null,
     httpBaseUrl: state === "running" ? `https://${app}.fly.dev` : null,
+    spare: machine.config?.metadata?.[SPARE_METADATA] ?? null,
   };
 };
 
@@ -297,7 +304,7 @@ export const make = Effect.gen(function* () {
     token: string,
     id: SandboxId,
     machineId: string,
-    state: "started" | "stopped",
+    state: "started" | "stopped" | "suspended",
     operation: SandboxOperation,
   ) {
     for (let waited = 0; waited < START_TIMEOUT_SECONDS; waited += WAIT_SECONDS) {
@@ -397,6 +404,7 @@ export const make = Effect.gen(function* () {
             t3code_sandbox: "1",
             t3code_sandbox_label: spec.label,
             t3code_sandbox_environment: spec.environmentId,
+            ...(spec.spare === null ? {} : { [SPARE_METADATA]: spec.spare }),
           },
           services: [
             {
@@ -427,8 +435,9 @@ export const make = Effect.gen(function* () {
       );
       yield* waitFor(fly.apiToken, spec.id, machine.id, "started", "create");
     }).pipe(
-      // A half-built app would keep billing for its IPs and machine, so take it down.
-      Effect.tapError(() =>
+      // A half-built app would keep billing for its IPs and machine, so take it
+      // down, including when the create is interrupted.
+      Effect.onError(() =>
         call(fly.apiToken, "DELETE", `/v1/apps/${app}`, "create", spec.id).pipe(Effect.ignore),
       ),
     );
@@ -463,6 +472,37 @@ export const make = Effect.gen(function* () {
     yield* waitFor(fly.apiToken, id, machine.id, "stopped", "stop");
   });
 
+  const park: SandboxDriver["park"] = Effect.fn("FlySandboxDriver.park")(function* (id) {
+    const fly = yield* requireConfigured;
+    const machine = yield* machineOf(fly.apiToken, id, "park");
+    const path = `/v1/apps/${appName(id)}/machines/${machine.id}`;
+    const suspended = yield* call(fly.apiToken, "POST", `${path}/suspend`, "park", id);
+    if (suspended.status >= 200 && suspended.status < 300) {
+      yield* waitFor(fly.apiToken, id, machine.id, "suspended", "park");
+      return;
+    }
+    yield* Effect.logInfo("Fly could not suspend a spare sandbox; stopping it instead", {
+      id,
+      status: suspended.status,
+    });
+    yield* call(fly.apiToken, "POST", `${path}/stop`, "park", id, { timeout: "10s" }).pipe(
+      Effect.flatMap((response) => expectOk(response, "park", id)),
+    );
+    yield* waitFor(fly.apiToken, id, machine.id, "stopped", "park");
+  });
+
+  const claim: SandboxDriver["claim"] = Effect.fn("FlySandboxDriver.claim")(function* (id) {
+    const fly = yield* requireConfigured;
+    const machine = yield* machineOf(fly.apiToken, id, "claim");
+    yield* call(
+      fly.apiToken,
+      "DELETE",
+      `/v1/apps/${appName(id)}/machines/${machine.id}/metadata/${SPARE_METADATA}`,
+      "claim",
+      id,
+    ).pipe(Effect.flatMap((response) => expectOk(response, "claim", id)));
+  });
+
   const remove: SandboxDriver["remove"] = Effect.fn("FlySandboxDriver.remove")(function* (id) {
     const fly = yield* requireConfigured;
     const response = yield* call(fly.apiToken, "DELETE", `/v1/apps/${appName(id)}`, "remove", id);
@@ -495,5 +535,5 @@ export const make = Effect.gen(function* () {
     },
   );
 
-  return { list, find, create, start, stop, remove, exec } satisfies SandboxDriver;
+  return { list, find, create, start, stop, park, claim, remove, exec } satisfies SandboxDriver;
 });

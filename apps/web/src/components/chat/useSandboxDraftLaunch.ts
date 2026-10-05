@@ -15,23 +15,10 @@ import { connectSandbox, sandboxEnvironment, syncSandboxes } from "../../state/s
 import { useAtomCommand } from "../../state/use-atom-command";
 import { waitForAtomValue } from "../../state/waitForAtomValue";
 
-/** A sandbox's server registers its project shortly after it answers. */
-const SANDBOX_PROJECT_TIMEOUT_MS = 120_000;
-const SANDBOX_LABEL_LENGTH = 48;
+/** The project appears once the sandbox has cloned the repository, which large ones make slow. */
+const SANDBOX_PROJECT_TIMEOUT_MS = 300_000;
 
-/** A short sandbox name from the first line of the prompt. */
-export function sandboxLabelFromPrompt(prompt: string): string | undefined {
-  const firstLine = prompt
-    .split("\n")
-    .find((line) => line.trim().length > 0)
-    ?.trim();
-  if (!firstLine) return undefined;
-  return firstLine.length > SANDBOX_LABEL_LENGTH
-    ? `${firstLine.slice(0, SANDBOX_LABEL_LENGTH - 1).trimEnd()}…`
-    : firstLine;
-}
-
-export type SandboxLaunchStageId = "create" | "connect" | "send";
+export type SandboxLaunchStageId = "create" | "connect" | "clone" | "send";
 
 export interface SandboxLaunchStage {
   readonly id: SandboxLaunchStageId;
@@ -51,7 +38,7 @@ export type SandboxLaunchState =
       readonly error: string | null;
     };
 
-const STAGE_ORDER: ReadonlyArray<SandboxLaunchStageId> = ["create", "connect", "send"];
+const STAGE_ORDER: ReadonlyArray<SandboxLaunchStageId> = ["create", "connect", "clone", "send"];
 
 /** Marks `id` running from `now`, finishing every earlier stage. */
 export function advanceSandboxLaunch(
@@ -109,8 +96,9 @@ const failureMessage = (result: Parameters<typeof squashAtomCommandFailure>[0]) 
 
 /**
  * Creates a sandbox for a draft, connects to it, and resolves the project the
- * draft should move to: the sandbox's copy of the same logical project. The
- * caller sends the queued message there, then calls `finish`.
+ * draft should move to: the sandbox's copy of the same logical project, which
+ * appears once the sandbox has cloned it. The caller sends the queued message
+ * there, then calls `finish`.
  */
 export function useSandboxDraftLaunch() {
   const create = useAtomCommand(sandboxEnvironment.create, { reportFailure: false });
@@ -121,7 +109,6 @@ export function useSandboxDraftLaunch() {
   const launch = async (input: {
     readonly hostEnvironmentId: EnvironmentId;
     readonly repositoryUrl: string;
-    readonly label: string | undefined;
     readonly logicalProjectKey: string;
     readonly projectGroupingSettings: ReturnType<typeof selectProjectGroupingSettings>;
   }): Promise<{ environmentId: EnvironmentId; projectId: ProjectId } | null> => {
@@ -133,10 +120,7 @@ export function useSandboxDraftLaunch() {
 
     const created = await create({
       environmentId: input.hostEnvironmentId,
-      input: {
-        repositoryUrl: input.repositoryUrl,
-        ...(input.label ? { label: input.label } : {}),
-      },
+      input: { repositoryUrl: input.repositoryUrl },
     });
     if (created._tag === "Failure") {
       if (isAtomCommandInterrupted(created)) return fail("Starting the sandbox was interrupted.");
@@ -152,6 +136,7 @@ export function useSandboxDraftLaunch() {
     const environmentId = connected.value;
     // Thread menus find the new sandbox through the host's list.
     void sync(input.hostEnvironmentId);
+    setState((current) => advanceSandboxLaunch(current, "clone", Date.now()));
     const matches = (project: { environmentId: EnvironmentId }) =>
       project.environmentId === environmentId &&
       deriveLogicalProjectKeyFromSettings(
@@ -166,7 +151,7 @@ export function useSandboxDraftLaunch() {
     });
     const project = appAtomRegistry.get(environmentProjects.projectsAtom).find(matches);
     if (!found || !project) {
-      return fail("The sandbox is running, but the repository did not appear in it.");
+      return fail("The sandbox is running, but the repository did not finish cloning in it.");
     }
     setState((current) => advanceSandboxLaunch(current, "send", Date.now()));
     return { environmentId, projectId: project.id };

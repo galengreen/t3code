@@ -69,12 +69,8 @@ const sandboxListCommand = Command.make("list", { ...projectLocationFlags }).pip
 
 const sandboxCreateCommand = Command.make("create", {
   ...projectLocationFlags,
-  label: Flag.String("label").pipe(
-    Flag.withDescription("Name shown for the sandbox."),
-    Flag.optional,
-  ),
   repo: Flag.String("repo").pipe(
-    Flag.withDescription("Git URL to clone into the sandbox on first start."),
+    Flag.withDescription("Git URL to clone into the sandbox's ~/work and add as a project."),
     Flag.optional,
   ),
 }).pipe(
@@ -82,10 +78,7 @@ const sandboxCreateCommand = Command.make("create", {
   Command.withHandler((flags) =>
     runWithSandboxes(flags, (sandboxes) =>
       sandboxes
-        .create({
-          ...(flags.label._tag === "Some" ? { label: flags.label.value } : {}),
-          ...(flags.repo._tag === "Some" ? { repositoryUrl: flags.repo.value } : {}),
-        })
+        .create(flags.repo._tag === "Some" ? { repositoryUrl: flags.repo.value } : {})
         .pipe(Effect.flatMap((sandbox) => Console.log(formatSandbox(sandbox)))),
     ),
   ),

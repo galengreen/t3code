@@ -5,12 +5,21 @@
  * everywhere. New sandboxes go to the `sandboxBackend` setting's driver, and
  * each existing one is managed by whichever driver knows it.
  *
- * The configured image must start a T3 server on port 7777 and put `t3` on
- * PATH, which pairing uses to mint a credential inside the sandbox. It reads
- * `T3_SANDBOX_LABEL` (the environment's name), `REPO_URL` (cloned on first
- * start), and `T3_ENVIRONMENT_ID` (written as the server's environment id
- * before its first start, so the host knows it even while the sandbox sleeps). Every sandbox also starts with the host's `sandboxEnvironment`
- * variables, such as an agent login token.
+ * The configured image (`packaging/sandbox` builds the reference one) must
+ * start a T3 server on port 7777 as its `dev` user and put two commands on
+ * PATH: `t3`, which pairing uses to mint a credential inside the sandbox, and
+ * `t3-sandbox-clone <url>`, which clones a repository in the background and
+ * adds it as a project. It reads `T3_SANDBOX_LABEL` (the environment's name)
+ * and `T3_ENVIRONMENT_ID` (written as the server's environment id before its
+ * first start, so the host knows it even while the sandbox sleeps). Every
+ * sandbox also starts with the host's `sandboxEnvironment` variables, such as
+ * an agent login token.
+ *
+ * With `sandboxKeepReady` on, the host keeps one spare: a sandbox booted with
+ * the current settings and parked (suspended where the backend can), with no
+ * repository yet. Creating claims it, wakes it, and starts its clone, which
+ * takes seconds instead of a full boot. Changing the settings that shape a
+ * sandbox replaces the spare, since its variables are fixed at creation.
  */
 import {
   SandboxNotFoundError,
@@ -27,8 +36,11 @@ import {
   type SandboxIdInput,
   type SandboxPairing,
   type SandboxSummary,
+  type ServerSettings as SandboxSettings,
 } from "@t3tools/contracts";
 import { waitForHttpReady } from "@t3tools/shared/httpReadiness";
+import * as NodeCrypto from "node:crypto";
+
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
@@ -37,8 +49,10 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
+import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
+import * as Stream from "effect/Stream";
 import { HttpClient } from "effect/unstable/http";
 
 import * as ServerConfig from "../config.ts";
@@ -64,11 +78,39 @@ const decodeRemovedRecords = Schema.decodeUnknownEffect(RemovedRecords);
 const encodeRemovedRecords = Schema.encodeEffect(RemovedRecords);
 const decodeDescriptor = Schema.decodeUnknownEffect(EnvironmentDescriptor);
 
+/** A spare is named before anyone knows what it will be for, so every sandbox is named by id. */
+const sandboxLabel = (id: SandboxId) => `Sandbox ${id.slice(0, 6)}`;
+
+/**
+ * The settings a sandbox's machine is made with. A spare made under a
+ * different fingerprint would start with stale variables or the wrong image.
+ */
+const spareFingerprint = (current: SandboxSettings) =>
+  NodeCrypto.createHash("sha256")
+    .update(
+      JSON.stringify([
+        current.sandboxBackend,
+        current.sandboxImage,
+        current.sandboxSize,
+        current.sandboxSleepAfterMinutes,
+        current.sandboxEnvironment,
+        current.sandboxBackend === "fly"
+          ? [current.sandboxFly.organization, current.sandboxFly.region]
+          : current.sandboxPublishHost,
+      ]),
+    )
+    .digest("hex")
+    .slice(0, 16);
+
 export class SandboxService extends Context.Service<
   SandboxService,
   {
     readonly list: Effect.Effect<ReadonlyArray<SandboxSummary>, SandboxError>;
-    /** Creates and starts a sandbox, returning once its T3 server answers. */
+    /**
+     * Creates and starts a sandbox, or claims the spare, returning once its T3
+     * server answers. Its repository is still cloning then; the project
+     * appears when the clone finishes.
+     */
     readonly create: (input: SandboxCreateInput) => Effect.Effect<SandboxSummary, SandboxError>;
     readonly start: (input: SandboxIdInput) => Effect.Effect<SandboxSummary, SandboxError>;
     /** Stops the sandbox; its files and conversations are kept. */
@@ -87,6 +129,11 @@ export class SandboxService extends Context.Service<
      * can forget its connection to one, whoever or whatever deleted it.
      */
     readonly removedEnvironments: Effect.Effect<ReadonlyArray<EnvironmentId>, SandboxError>;
+    /**
+     * Leaves exactly one parked spare made with the current settings, or none
+     * when `sandboxKeepReady` or sandboxes are off. Other spares are deleted.
+     */
+    readonly keepSpareReady: Effect.Effect<void, SandboxError>;
     /** What a Fly token (the given one, else the saved one) can reach. */
     readonly flyAccount: (
       input: SandboxFlyAccountInput,
@@ -107,6 +154,11 @@ const make = Effect.gen(function* () {
     "sandbox-removed.json",
   );
   const removedLock = yield* Semaphore.make(1);
+  /** Held while choosing a spare to claim or delete, so no spare is both. */
+  const claimLock = yield* Semaphore.make(1);
+  /** Held while making a spare, so two refills never make two. */
+  const spareLock = yield* Semaphore.make(1);
+  const scope = yield* Effect.scope;
 
   /** Deleted sandboxes' environments still within the retention window. */
   const readRemoved = Effect.gen(function* () {
@@ -245,53 +297,165 @@ const make = Effect.gen(function* () {
       { concurrency: "unbounded" },
     );
     return yield* Effect.forEach(
-      machines.flat(),
+      machines.flat().filter(({ machine }) => machine.spare === null),
       ({ backend, machine }) => summarize(backend, machine),
       { concurrency: "unbounded" },
     );
   }).pipe(Effect.withSpan("SandboxService.list"));
 
+  const newIdentity = Effect.gen(function* () {
+    const uuid = yield* crypto.randomUUIDv4;
+    const environmentId = EnvironmentId.make(yield* crypto.randomUUIDv4);
+    return { id: uuid.replaceAll("-", "").slice(0, 12), environmentId };
+  }).pipe(Effect.mapError((cause) => new SandboxOperationError({ operation: "create", cause })));
+
+  /** Makes and boots a machine under the current settings; a spare when given a fingerprint. */
+  const makeMachine = Effect.fn("SandboxService.makeMachine")(function* (
+    current: SandboxSettings,
+    spare: string | null,
+  ) {
+    const { id, environmentId } = yield* newIdentity;
+    const label = sandboxLabel(id);
+    yield* drivers[current.sandboxBackend].create({
+      id,
+      environmentId,
+      label,
+      image: current.sandboxImage,
+      size: current.sandboxSize,
+      spare,
+      // The image's own variables come last so the host's list cannot replace them.
+      environment: [
+        ...current.sandboxEnvironment,
+        { name: "T3_HOST", value: "0.0.0.0", sensitive: false },
+        { name: "T3_SANDBOX_LABEL", value: label, sensitive: false },
+        { name: "T3_ENVIRONMENT_ID", value: environmentId, sensitive: false },
+        ...(current.sandboxSleepAfterMinutes > 0
+          ? [
+              {
+                name: "T3CODE_SLEEP_WHEN_IDLE_MINUTES",
+                value: String(current.sandboxSleepAfterMinutes),
+                sensitive: false,
+              },
+            ]
+          : []),
+      ],
+    });
+    return id;
+  });
+
+  /** Unclaimed spares on every backend that can be listed. */
+  const listSpares = Effect.forEach(BACKENDS, (backend) =>
+    drivers[backend].list.pipe(
+      Effect.orElseSucceed(() => []),
+      Effect.map((machines) =>
+        machines
+          .filter((machine) => machine.spare !== null)
+          .map((machine) => ({ backend, machine })),
+      ),
+    ),
+  ).pipe(Effect.map((spares) => spares.flat()));
+
+  /** Claims the parked spare that matches the current settings, if there is one. */
+  const claimSpare = (current: SandboxSettings) =>
+    claimLock.withPermits(1)(
+      Effect.gen(function* () {
+        const fingerprint = spareFingerprint(current);
+        const spare = (yield* listSpares).find(
+          ({ backend, machine }) =>
+            backend === current.sandboxBackend &&
+            machine.spare === fingerprint &&
+            machine.state === "stopped",
+        );
+        if (!spare) return null;
+        yield* drivers[spare.backend].claim(spare.machine.id);
+        return spare.machine.id;
+      }),
+    );
+
+  const keepSpareReady: SandboxService["Service"]["keepSpareReady"] = spareLock
+    .withPermits(1)(
+      Effect.gen(function* () {
+        const current = yield* readSettings;
+        const wanted =
+          current.enableSandboxes && current.sandboxKeepReady ? spareFingerprint(current) : null;
+        const kept = yield* claimLock.withPermits(1)(
+          Effect.gen(function* () {
+            let keep: SandboxId | null = null;
+            for (const { backend, machine } of yield* listSpares) {
+              if (
+                keep === null &&
+                wanted !== null &&
+                backend === current.sandboxBackend &&
+                machine.spare === wanted &&
+                machine.state !== "failed"
+              ) {
+                // Nothing is making a spare while this lock is held, so a
+                // running one was left awake by an interrupted refill.
+                if (machine.state === "running") yield* drivers[backend].park(machine.id);
+                keep = machine.id;
+                continue;
+              }
+              yield* drivers[backend].remove(machine.id);
+              yield* Effect.logInfo("Deleted an outdated spare sandbox", { id: machine.id });
+            }
+            return keep;
+          }),
+        );
+        if (wanted === null || kept !== null) return;
+
+        const backend = current.sandboxBackend;
+        const id = yield* makeMachine(current, wanted);
+        yield* drivers[backend].find(id, "create").pipe(
+          Effect.flatMap((machine) => waitUntilReady(machine, "create")),
+          Effect.andThen(drivers[backend].park(id)),
+          // A spare that never got ready, or whose refill was interrupted (a CLI
+          // create exits right after claiming), is no use; remove it now.
+          Effect.onError(() => drivers[backend].remove(id).pipe(Effect.ignore)),
+        );
+        yield* Effect.logInfo("A spare sandbox is ready", { id, backend });
+      }),
+    )
+    .pipe(Effect.withSpan("SandboxService.keepSpareReady"));
+
+  /** Refills the spare after this request, without making the request wait for it. */
+  const refillSpare = keepSpareReady.pipe(
+    Effect.catchCause((cause) => Effect.logWarning("Could not make a spare sandbox", { cause })),
+    Effect.forkIn(scope),
+  );
+
   const create: SandboxService["Service"]["create"] = Effect.fn("SandboxService.create")(
     function* (input) {
       const current = yield* ensureAvailable;
-      const uuid = yield* crypto.randomUUIDv4.pipe(
-        Effect.mapError((cause) => new SandboxOperationError({ operation: "create", cause })),
-      );
-      const id = uuid.replaceAll("-", "").slice(0, 12);
-      const environmentId = EnvironmentId.make(
-        yield* crypto.randomUUIDv4.pipe(
-          Effect.mapError((cause) => new SandboxOperationError({ operation: "create", cause })),
-        ),
-      );
-      const label = input.label ?? id;
       const backend = current.sandboxBackend;
-      yield* drivers[backend].create({
-        id,
-        environmentId,
-        label,
-        image: current.sandboxImage,
-        size: current.sandboxSize,
-        // The image's own variables come last so the host's list cannot replace them.
-        environment: [
-          ...current.sandboxEnvironment,
-          { name: "T3_HOST", value: "0.0.0.0", sensitive: false },
-          { name: "T3_SANDBOX_LABEL", value: label, sensitive: false },
-          { name: "T3_ENVIRONMENT_ID", value: environmentId, sensitive: false },
-          ...(current.sandboxSleepAfterMinutes > 0
-            ? [
-                {
-                  name: "T3CODE_EXIT_WHEN_IDLE_MINUTES",
-                  value: String(current.sandboxSleepAfterMinutes),
-                  sensitive: false,
-                },
-              ]
-            : []),
-          ...(input.repositoryUrl
-            ? [{ name: "REPO_URL", value: input.repositoryUrl, sensitive: false }]
-            : []),
-        ],
-      });
-      return yield* ready(backend, id, "create");
+      const claimed = current.sandboxKeepReady
+        ? yield* claimSpare(current).pipe(
+            Effect.flatMap((id) =>
+              id === null
+                ? Effect.succeed(null)
+                : drivers[backend].start(id).pipe(
+                    Effect.andThen(ready(backend, id, "create")),
+                    // A spare that will not wake is no use to anyone.
+                    Effect.tapError(() => drivers[backend].remove(id).pipe(Effect.ignore)),
+                  ),
+            ),
+            Effect.catchCause((cause) =>
+              Effect.logWarning("Could not use the spare sandbox; making a new one", {
+                cause,
+              }).pipe(Effect.as(null)),
+            ),
+          )
+        : null;
+      const sandbox =
+        claimed ?? (yield* ready(backend, yield* makeMachine(current, null), "create"));
+      if (input.repositoryUrl) {
+        yield* drivers[backend].exec(
+          sandbox.id,
+          ["t3-sandbox-clone", input.repositoryUrl],
+          "clone",
+        );
+      }
+      if (current.sandboxKeepReady) yield* refillSpare;
+      return sandbox;
     },
   );
 
@@ -363,6 +527,7 @@ const make = Effect.gen(function* () {
       // A backend that cannot be listed (Fly without a token) has nothing to prune.
       const machines = yield* drivers[backend].list.pipe(Effect.orElseSucceed(() => []));
       for (const machine of machines) {
+        if (machine.spare !== null) continue;
         const stoppedAt = machine.stoppedAt === null ? NaN : Date.parse(machine.stoppedAt);
         if (machine.state !== "stopped" || !(stoppedAt < cutoff)) continue;
         yield* drivers[backend].remove(machine.id);
@@ -391,10 +556,42 @@ const make = Effect.gen(function* () {
       Effect.map((records) => records.map((record) => record.environmentId)),
     ),
     flyAccount: flyAccountOf,
+    keepSpareReady,
   });
 });
 
 export const layer = Layer.effect(SandboxService, make);
+
+/**
+ * Keeps the spare in step with the settings: made on start, replaced when a
+ * setting that shapes sandboxes changes, deleted when keeping one or
+ * sandboxes are turned off, and checked hourly in case one was lost. Servers
+ * that never had sandboxes on never look for spares.
+ */
+export const sparesLayer = Layer.effectDiscard(
+  Effect.gen(function* () {
+    const sandboxes = yield* SandboxService;
+    const settings = yield* ServerSettings.ServerSettingsService;
+    const wasEnabled = yield* Ref.make(false);
+    const refill = Effect.gen(function* () {
+      const { enableSandboxes } = yield* settings.getSettings;
+      // One more pass after sandboxes are turned off deletes the spare.
+      if (enableSandboxes || (yield* Ref.getAndSet(wasEnabled, enableSandboxes))) {
+        yield* Ref.set(wasEnabled, enableSandboxes);
+        yield* sandboxes.keepSpareReady;
+      }
+    }).pipe(
+      Effect.catchCause((cause) => Effect.logWarning("Could not make a spare sandbox", { cause })),
+    );
+    yield* Stream.merge(
+      settings.streamChanges.pipe(Stream.debounce("2 seconds")),
+      Stream.tick(Duration.hours(1)),
+    ).pipe(
+      Stream.runForEach(() => refill),
+      Effect.forkScoped,
+    );
+  }),
+);
 
 /**
  * Prunes long-stopped sandboxes an hour after start and hourly after that.

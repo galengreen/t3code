@@ -299,7 +299,7 @@ import {
 import { cn, randomUUID } from "~/lib/utils";
 import { COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS } from "~/workspaceTitlebar";
 import { stackedThreadToast, toastManager } from "./ui/toast";
-import { sandboxLabelFromPrompt, useSandboxDraftLaunch } from "./chat/useSandboxDraftLaunch";
+import { useSandboxDraftLaunch } from "./chat/useSandboxDraftLaunch";
 import {
   decodeProjectScriptKeybindingRule,
   keybindingValueForCommand,
@@ -4514,7 +4514,6 @@ export default function ChatView(props: ChatViewProps) {
       .launch({
         hostEnvironmentId: environmentId,
         repositoryUrl: sandboxRepositoryUrl,
-        label: sandboxLabelFromPrompt(promptRef.current),
         logicalProjectKey: deriveLogicalProjectKeyFromSettings(
           activeProject,
           projectGroupingSettings,

@@ -160,7 +160,7 @@ function SandboxControls({ environmentId }: { readonly environmentId: Environmen
           />
           <SettingsRow
             {...searchableSetting("sandbox-sleep")}
-            description="Stop a sandbox once no agent is working in it and nobody has used it for this long, so it stops costing money. Opening its thread wakes it. Applies to sandboxes created afterwards."
+            description="Put a sandbox to sleep once no agent is working in it and nobody has used it for this long, so it stops costing money. Opening its thread wakes it. Applies to sandboxes created afterwards."
             control={
               <Select
                 value={String(settings.sandboxSleepAfterMinutes)}
@@ -180,6 +180,21 @@ function SandboxControls({ environmentId }: { readonly environmentId: Environmen
                   ))}
                 </SelectPopup>
               </Select>
+            }
+          />
+          <SettingsRow
+            {...searchableSetting("sandbox-keep-ready")}
+            description={
+              fly
+                ? "Keep one sandbox booted and asleep, so a new one starts in seconds. A sleeping sandbox only costs its storage, a few cents a month."
+                : "Keep one sandbox booted and paused, so a new one starts in seconds. A paused sandbox holds its memory on this machine."
+            }
+            control={
+              <Switch
+                checked={settings.sandboxKeepReady}
+                onCheckedChange={(checked) => void save({ sandboxKeepReady: Boolean(checked) })}
+                aria-label="Keep a sandbox ready"
+              />
             }
           />
           <SettingsRow

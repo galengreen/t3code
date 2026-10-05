@@ -1324,7 +1324,7 @@ export const ServerSettings = Schema.Struct({
   sandboxFly: SandboxFlySettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
   /**
    * Minutes a sandbox may sit with no agent working and no client using it
-   * before it stops itself; 0 keeps it running. Applies to sandboxes created
+   * before it sleeps; 0 keeps it running. Applies to sandboxes created
    * afterwards.
    */
   sandboxSleepAfterMinutes: NonNegativeInt.pipe(Schema.withDecodingDefault(Effect.succeed(20))),
@@ -1333,6 +1333,11 @@ export const ServerSettings = Schema.Struct({
    * unpushed changes included; 0 keeps stopped sandboxes.
    */
   sandboxDeleteAfterDays: NonNegativeInt.pipe(Schema.withDecodingDefault(Effect.succeed(14))),
+  /**
+   * Keeps one booted sandbox asleep and waiting, so a new one starts in
+   * seconds. It costs what any sleeping sandbox does.
+   */
+  sandboxKeepReady: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   sidebarAutoSettleAfterDays: Schema.NullOr(SidebarAutoSettleAfterDays).pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_SIDEBAR_AUTO_SETTLE_AFTER_DAYS)),
   ),
@@ -1702,6 +1707,7 @@ export const ServerSettingsPatch = Schema.Struct({
   sandboxSize: Schema.optionalKey(SandboxSize),
   sandboxSleepAfterMinutes: Schema.optionalKey(NonNegativeInt),
   sandboxDeleteAfterDays: Schema.optionalKey(NonNegativeInt),
+  sandboxKeepReady: Schema.optionalKey(Schema.Boolean),
   sandboxFly: Schema.optionalKey(
     Schema.Struct({
       apiToken: Schema.optionalKey(TrimmedString),
