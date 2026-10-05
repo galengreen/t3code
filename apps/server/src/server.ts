@@ -1040,7 +1040,6 @@ const makeServerLayer = Layer.unwrap(
 
     return serverApplicationLayer.pipe(
       Layer.provideMerge(runtimeServicesLive),
-      Layer.provideMerge(IdleShutdown.clientActivityLayer),
       Layer.provideMerge(
         McpSessionRegistry.layer.pipe(
           Layer.provide(ServerEnvironment.layer.pipe(Layer.provide(ServerSecretStore.layer))),

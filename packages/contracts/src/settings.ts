@@ -1323,8 +1323,8 @@ export const ServerSettings = Schema.Struct({
   sandboxSize: SandboxSize.pipe(Schema.withDecodingDefault(Effect.succeed("small"))),
   sandboxFly: SandboxFlySettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
   /**
-   * Minutes a sandbox may sit with no agent working and no client using it
-   * before it sleeps; 0 keeps it running. Applies to sandboxes created
+   * Minutes a sandbox may sit with no agent working (sending a message starts
+   * one) before it sleeps; 0 keeps it running. Applies to sandboxes created
    * afterwards.
    */
   sandboxSleepAfterMinutes: NonNegativeInt.pipe(Schema.withDecodingDefault(Effect.succeed(20))),

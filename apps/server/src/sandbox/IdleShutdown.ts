@@ -1,21 +1,19 @@
 /**
- * Lets a sandbox's server put its machine to sleep when nobody is using it,
+ * Lets a sandbox's server put its machine to sleep when its agent is idle,
  * so sandboxes stop billing on their own, even while the host that made them
  * is offline. On a Fly machine it asks Fly to suspend the machine, which keeps
  * memory and wakes in about a second; elsewhere, or if Fly refuses (machines
  * over 2 GB cannot suspend), the server exits, and the machine ends with it.
  *
  * Off unless `T3CODE_SLEEP_WHEN_IDLE_MINUTES` is set, which only sandbox hosts
- * do. Idle means no thread has a run in progress and no client has made a
- * request for that long. Open subscriptions and the requests clients send on
- * a timer do not count, so a tab left open overnight does not keep a sandbox
- * running.
+ * do. Idle means no thread has had a run in progress for that long: sending a
+ * message starts a run, and the agent working keeps it going. Clients being
+ * connected, or browsing the sandbox, do not count. Waking does, so a sandbox
+ * opened from its thread gets a full window before it can sleep again.
  */
-import { WS_METHODS } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
 import * as Clock from "effect/Clock";
 import * as Config from "effect/Config";
-import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -23,7 +21,6 @@ import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
 import * as Schedule from "effect/Schedule";
 import { HttpClient, HttpClientRequest } from "effect/unstable/http";
-import type { RpcServer } from "effect/unstable/rpc";
 import * as NodeHttpClient from "@effect/platform-node/NodeHttpClient";
 
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
@@ -38,90 +35,33 @@ const CHECK_INTERVAL = Duration.seconds(30);
  */
 const WAKE_GAP = Duration.seconds(45);
 
-/** When a client last asked this server for something. */
-export class ClientActivity extends Context.Service<
-  ClientActivity,
-  {
-    readonly touch: Effect.Effect<void>;
-    readonly lastActiveAt: Effect.Effect<number>;
-  }
->()("t3/sandbox/IdleShutdown/ClientActivity") {}
-
-export const clientActivityLayer = Layer.effect(
-  ClientActivity,
-  Effect.gen(function* () {
-    const lastActiveAt = yield* Ref.make(yield* Clock.currentTimeMillis);
-    return ClientActivity.of({
-      touch: Clock.currentTimeMillis.pipe(Effect.flatMap((now) => Ref.set(lastActiveAt, now))),
-      lastActiveAt: Ref.get(lastActiveAt),
-    });
-  }),
-);
-
-/**
- * Requests every connected client sends on a timer, to every environment it
- * knows, whether or not anyone is looking at it.
- */
-const BACKGROUND_METHODS: ReadonlySet<string> = new Set([
-  WS_METHODS.serverProbe,
-  WS_METHODS.serverReportClientActivity,
-]);
-
-/** Records each client request as activity, except the ones clients send on a timer. */
-export function withClientActivity(
-  protocol: RpcServer.Protocol["Service"],
-  touch: Effect.Effect<void>,
-): RpcServer.Protocol["Service"] {
-  return {
-    ...protocol,
-    run: (write) =>
-      protocol.run((clientId, message) =>
-        message._tag === "Request" && !BACKGROUND_METHODS.has(message.tag)
-          ? Effect.andThen(touch, write(clientId, message))
-          : write(clientId, message),
-      ),
-  };
-}
-
-/** Whether a server last used at `lastActiveAt` has been idle for `idleAfter` by `now`. */
-export const isIdle = (input: {
-  readonly now: number;
-  readonly lastActiveAt: number;
-  readonly runInProgress: boolean;
-  readonly idleAfter: Duration.Duration;
-}) => !input.runInProgress && input.now - input.lastActiveAt >= Duration.toMillis(input.idleAfter);
-
 /**
  * Checks for idleness every 30 seconds and calls `sleep` once idle. A run in
- * progress counts as activity, so a long turn's end starts a fresh window, and
- * so does waking: when `sleep` suspends the machine, it returns once resumed.
+ * progress counts as activity, so a turn's end starts a fresh window, and so
+ * does waking: when `sleep` suspends the machine, it returns once resumed.
  */
 export const make = (options: { readonly sleep: Effect.Effect<void> }) =>
   Effect.gen(function* () {
     const minutes = yield* Config.Int("T3CODE_SLEEP_WHEN_IDLE_MINUTES").pipe(Config.option);
     if (Option.isNone(minutes) || minutes.value <= 0) return;
-    const idleAfter = Duration.minutes(minutes.value);
-    const activity = yield* ClientActivity;
+    const idleAfterMs = Duration.toMillis(Duration.minutes(minutes.value));
     const threads = yield* ThreadManagementService.ThreadManagementService;
-    const lastCheckedAt = yield* Ref.make(yield* Clock.currentTimeMillis);
+    const started = yield* Clock.currentTimeMillis;
+    const lastActiveAt = yield* Ref.make(started);
+    const lastCheckedAt = yield* Ref.make(started);
 
     const check = Effect.gen(function* () {
       const snapshot = yield* threads.getShellSnapshot({ location: "active" });
       const runInProgress = snapshot.threads.some((thread) => thread.activeRunId !== null);
       const now = yield* Clock.currentTimeMillis;
       const woke = now - (yield* Ref.getAndSet(lastCheckedAt, now)) > Duration.toMillis(WAKE_GAP);
-      if (runInProgress || woke) yield* activity.touch;
-      const idle = isIdle({
-        now,
-        lastActiveAt: yield* activity.lastActiveAt,
-        runInProgress,
-        idleAfter,
-      });
-      if (!idle) return;
+      if (runInProgress || woke) yield* Ref.set(lastActiveAt, now);
+      if (runInProgress || now - (yield* Ref.get(lastActiveAt)) < idleAfterMs) return;
       yield* Effect.logInfo("Sleeping: idle", { minutes: minutes.value });
       yield* options.sleep;
-      yield* activity.touch;
-      yield* Ref.set(lastCheckedAt, yield* Clock.currentTimeMillis);
+      const resumed = yield* Clock.currentTimeMillis;
+      yield* Ref.set(lastActiveAt, resumed);
+      yield* Ref.set(lastCheckedAt, resumed);
     }).pipe(Effect.catchCause((cause) => Effect.logWarning("Idle check failed", { cause })));
 
     yield* check.pipe(Effect.repeat(Schedule.spaced(CHECK_INTERVAL)), Effect.forkScoped);

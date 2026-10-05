@@ -178,7 +178,6 @@ import * as TerminalManager from "./terminal/Manager.ts";
 import { withTerminalOutputWindow } from "./terminal/OutputProtocol.ts";
 import * as PreviewAutomationBroker from "./mcp/PreviewAutomationBroker.ts";
 import * as DeviceService from "./device/DeviceService.ts";
-import * as IdleShutdown from "./sandbox/IdleShutdown.ts";
 import * as SandboxService from "./sandbox/SandboxService.ts";
 import { remoteSshDeviceHosts } from "./device/localSshDeviceHost.ts";
 import * as PreviewManager from "./preview/Manager.ts";
@@ -3818,7 +3817,6 @@ const makeWsRpcLayer = (
 export const websocketRpcRouteLayer = Layer.unwrap(
   Effect.gen(function* () {
     const previewAutomationBroker = yield* PreviewAutomationBroker.PreviewAutomationBroker;
-    const clientActivity = yield* IdleShutdown.ClientActivity;
     const serverSelfUpdate = yield* ServerSelfUpdate.ServerSelfUpdate;
     const pullRequests = yield* PullRequestService.PullRequestService;
     const sql = yield* SqlClient.SqlClient;
@@ -3859,13 +3857,7 @@ export const websocketRpcRouteLayer = Layer.unwrap(
         const rpcWebSocketHttpEffect = yield* Effect.gen(function* () {
           const { protocol, httpEffect } = yield* RpcServer.makeProtocolWithHttpEffectWebsocket;
           yield* RpcServer.make(ServerWsRpcGroup, { disableTracing: true }).pipe(
-            Effect.provideService(
-              RpcServer.Protocol,
-              IdleShutdown.withClientActivity(
-                withTerminalOutputWindow(protocol),
-                clientActivity.touch,
-              ),
-            ),
+            Effect.provideService(RpcServer.Protocol, withTerminalOutputWindow(protocol)),
             Effect.provide(rpcScopeAuthorizationLayer(session.scopes)),
             Effect.forkScoped,
           );

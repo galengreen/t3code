@@ -35,19 +35,16 @@ const harness = (env: Record<string, string>) =>
         ),
     } as unknown as ThreadManagementService.ThreadManagementService["Service"]);
     const context = yield* Layer.build(
-      Layer.mergeAll(IdleShutdown.clientActivityLayer, threads).pipe(
-        Layer.provideMerge(ConfigProvider.layer(ConfigProvider.fromEnv({ env }))),
-      ),
+      threads.pipe(Layer.provideMerge(ConfigProvider.layer(ConfigProvider.fromEnv({ env })))),
     );
     yield* IdleShutdown.make({ sleep: Ref.update(stopped, (count) => count + 1) }).pipe(
       Effect.provide(context),
     );
-    const activity = yield* IdleShutdown.ClientActivity.pipe(Effect.provide(context));
-    return { stopped, running, frozen, activity };
+    return { stopped, running, frozen };
   });
 
 describe("IdleShutdown", () => {
-  it.effect("stops once nothing has happened for the configured time", () =>
+  it.effect("sleeps once no run has been in progress for the configured time", () =>
     Effect.gen(function* () {
       const { stopped } = yield* harness({ T3CODE_SLEEP_WHEN_IDLE_MINUTES: "20" });
       yield* TestClock.adjust("19 minutes");
@@ -68,16 +65,6 @@ describe("IdleShutdown", () => {
       expect(yield* Ref.get(stopped)).toBe(0);
       yield* TestClock.adjust("2 minutes");
       expect(yield* Ref.get(stopped)).toBeGreaterThan(0);
-    }).pipe(Effect.scoped),
-  );
-
-  it.effect("starts the window again on each client request", () =>
-    Effect.gen(function* () {
-      const { stopped, activity } = yield* harness({ T3CODE_SLEEP_WHEN_IDLE_MINUTES: "20" });
-      yield* TestClock.adjust("15 minutes");
-      yield* activity.touch;
-      yield* TestClock.adjust("15 minutes");
-      expect(yield* Ref.get(stopped)).toBe(0);
     }).pipe(Effect.scoped),
   );
 

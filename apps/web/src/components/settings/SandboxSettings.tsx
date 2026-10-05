@@ -160,7 +160,7 @@ function SandboxControls({ environmentId }: { readonly environmentId: Environmen
           />
           <SettingsRow
             {...searchableSetting("sandbox-sleep")}
-            description="Put a sandbox to sleep once no agent is working in it and nobody has used it for this long, so it stops costing money. Opening its thread wakes it. Applies to sandboxes created afterwards."
+            description="Put a sandbox to sleep once its agent has finished and no message has been sent for this long, so it stops costing money. Opening its thread wakes it. Applies to sandboxes created afterwards."
             control={
               <Select
                 value={String(settings.sandboxSleepAfterMinutes)}
