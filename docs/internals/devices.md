@@ -37,7 +37,7 @@ platform-agnostic. SSH device hosts report desktop as unavailable.
 
 A local host that can run neither simulators nor emulators never installs or
 starts the hub, and its readiness carries no hub endpoint. That is the normal
-case for a Linux cube, so hub-only operations fail plainly rather than
+case for a Linux container, so hub-only operations fail plainly rather than
 pulling in tools nothing can use. Agent tools follow the same rule: agents drive
 desktops with `xdotool`, so a desktop-only host does not install agent-device.
 
