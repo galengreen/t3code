@@ -7,8 +7,9 @@
  *
  * Off unless `T3CODE_SLEEP_WHEN_IDLE_MINUTES` is set, which only sandbox hosts
  * do. Idle means no thread has a run in progress and no client has made a
- * request for that long. Heartbeat probes and open subscriptions do not
- * count, so a tab left open overnight does not keep a sandbox running.
+ * request for that long. Open subscriptions and the requests clients send on
+ * a timer do not count, so a tab left open overnight does not keep a sandbox
+ * running.
  */
 import { WS_METHODS } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
@@ -57,7 +58,16 @@ export const clientActivityLayer = Layer.effect(
   }),
 );
 
-/** Records each client request as activity, except the connection's heartbeat. */
+/**
+ * Requests every connected client sends on a timer, to every environment it
+ * knows, whether or not anyone is looking at it.
+ */
+const BACKGROUND_METHODS: ReadonlySet<string> = new Set([
+  WS_METHODS.serverProbe,
+  WS_METHODS.serverReportClientActivity,
+]);
+
+/** Records each client request as activity, except the ones clients send on a timer. */
 export function withClientActivity(
   protocol: RpcServer.Protocol["Service"],
   touch: Effect.Effect<void>,
@@ -66,7 +76,7 @@ export function withClientActivity(
     ...protocol,
     run: (write) =>
       protocol.run((clientId, message) =>
-        message._tag === "Request" && message.tag !== WS_METHODS.serverProbe
+        message._tag === "Request" && !BACKGROUND_METHODS.has(message.tag)
           ? Effect.andThen(touch, write(clientId, message))
           : write(clientId, message),
       ),
