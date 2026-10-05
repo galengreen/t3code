@@ -42,6 +42,11 @@ interface EnvironmentCommandAtomOptions<Input, A, E, R> extends Omit<
     registry: AtomRegistry.AtomRegistry,
     environmentId: EnvironmentIdType,
   ) => Effect.Effect<A, E, R>;
+  /**
+   * False for commands the app sends on its own rather than at the user's
+   * request (marking a thread seen), which must not wake a sleeping sandbox.
+   */
+  readonly wakesEnvironment?: boolean;
 }
 
 interface EnvironmentQueryAtomOptions<Input, A, E, R> extends EnvironmentAtomOptions<
@@ -651,7 +656,10 @@ export function createEnvironmentCommand<R, ER, Input, A, E>(
     ...(options.scheduler === undefined ? {} : { scheduler: options.scheduler }),
     ...(options.concurrency === undefined ? {} : { concurrency: options.concurrency }),
     execute: (target, registry) =>
-      connectIfNeeded(target.environmentId).pipe(
+      (options.wakesEnvironment === false
+        ? Effect.void
+        : connectIfNeeded(target.environmentId)
+      ).pipe(
         Effect.andThen(
           runInEnvironment(
             target.environmentId,
