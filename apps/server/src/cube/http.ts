@@ -63,6 +63,14 @@ export const cubeHttpApiLayer = HttpApiBuilder.group(
           yield* requireEnvironmentScope(AuthOrchestrationOperateScope);
           return yield* cubes.pair(args.payload);
         }),
+      )
+      .handle(
+        "createHome",
+        Effect.fn("environment.cubes.createHome")(function* (args) {
+          yield* annotateEnvironmentRequest(args.endpoint.name);
+          yield* requireEnvironmentScope(AuthOrchestrationOperateScope);
+          return yield* cubes.createHome;
+        }),
       );
   }),
 );

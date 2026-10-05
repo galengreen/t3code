@@ -175,6 +175,7 @@ import {
 import { orchestrationHttpApiLayer } from "./orchestration-v2/http.ts";
 import { projectHttpApiLayer } from "./project/http.ts";
 import { cubeHttpApiLayer } from "./cube/http.ts";
+import { serverSettingsHttpApiLayer } from "./serverSettingsHttp.ts";
 import * as NetService from "@t3tools/shared/Net";
 import * as RelayClient from "@t3tools/shared/relayClient";
 import { disableTailscaleServe, ensureTailscaleServe } from "@t3tools/tailscale";
@@ -657,6 +658,7 @@ const makeRoutesLayer = Layer.mergeAll(
       Layer.provide(pullRequestHttpApiLayer),
       Layer.provide(projectHttpApiLayer),
       Layer.provide(cubeHttpApiLayer),
+      Layer.provide(serverSettingsHttpApiLayer),
       Layer.provide(serverEnvironmentHttpApiLayer),
       Layer.provide(environmentAuthenticatedAuthLayer),
     ),

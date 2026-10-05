@@ -472,7 +472,8 @@ const WAKE_TIMEOUT = "60 seconds";
  * cube) before a user command runs in it. Other environments are left to
  * their own connection, so a command still fails fast while they are offline.
  */
-function connectIfNeeded(
+/** Wakes an environment that connects only when needed; others are left as they are. */
+export function connectIfNeeded(
   environmentId: EnvironmentIdType,
 ): Effect.Effect<void, EnvironmentRpcUnavailableError, EnvironmentRegistry.EnvironmentRegistry> {
   return Effect.gen(function* () {

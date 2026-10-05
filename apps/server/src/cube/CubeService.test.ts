@@ -5,6 +5,7 @@ import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as TestClock from "effect/testing/TestClock";
 import * as Layer from "effect/Layer";
+import * as Schema from "effect/Schema";
 import { HttpClient, HttpClientResponse } from "effect/unstable/http";
 
 import * as ServerConfig from "../config.ts";
@@ -431,5 +432,135 @@ describe("CubeService", () => {
       expect(error._tag).toBe("CubeUnavailableError");
       expect(docker.calls).toEqual([]);
     }).pipe(Effect.provide(serviceLayer(docker, false)));
+  });
+
+  describe("createHome", () => {
+    const parseJson = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Unknown));
+    const toJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
+    const FLY = { apiToken: "FlyV1 fm2_secret", organization: "personal", region: "syd" };
+
+    /**
+     * Fly, as far as making a home goes, and the home's own server, which
+     * takes its settings or, with `refuse`, does not.
+     */
+    const homeLayer = (refuse: boolean) => {
+      const pushed: unknown[] = [];
+      const client = HttpClient.make((request) =>
+        Effect.sync(() => {
+          const url = new URL(request.url);
+          const body =
+            request.body._tag === "Uint8Array"
+              ? (parseJson(new TextDecoder().decode(request.body.body)) as any)
+              : undefined;
+          const reply = (status: number, json?: unknown) =>
+            HttpClientResponse.fromWeb(
+              request,
+              json === undefined ? new Response(null, { status }) : Response.json(json, { status }),
+            );
+          if (url.hostname.endsWith(".fly.dev")) {
+            if (url.pathname === "/api/settings") {
+              if (refuse) {
+                return reply(500, {
+                  _tag: "EnvironmentInternalError",
+                  code: "internal_error",
+                  reason: "settings_update_failed",
+                  traceId: "trace",
+                });
+              }
+              pushed.push({ authorization: request.headers.authorization, body });
+              return reply(204);
+            }
+            return reply(200, { environmentId: "env-home" });
+          }
+          if (url.pathname.startsWith("/v1/orgs/")) return reply(200, { machines: [] });
+          if (url.pathname.endsWith("/machines") && request.method === "POST") {
+            return reply(200, { id: "m1", state: "started" });
+          }
+          if (url.pathname.endsWith("/machines"))
+            return reply(200, [{ id: "m1", state: "started" }]);
+          if (url.pathname.endsWith("/exec")) {
+            const command = (body.command as string[]).at(-1)!;
+            return reply(200, {
+              exit_code: 0,
+              stdout: command.includes("session")
+                ? "home-session-token\n"
+                : toJson({ credential: "HOMEPAIR", expiresAt: "later" }),
+            });
+          }
+          return reply(200, {});
+        }),
+      );
+      const layer = CubeService.layer.pipe(
+        Layer.provide(CubeDrivers.layer),
+        Layer.provideMerge(
+          ServerSettings.layerTest({
+            enableCubes: true,
+            cubeBackend: "fly",
+            cubeImage: "registry.fly.io/cube:test",
+            cubeFly: FLY,
+            // As read settings carry a stored secret.
+            cubeEnvironment: [
+              {
+                name: "CLAUDE_CODE_OAUTH_TOKEN",
+                value: "sk-ant-oat-secret",
+                sensitive: true,
+                valueRedacted: true,
+              },
+            ],
+          }),
+        ),
+        Layer.provide(
+          Layer.succeed(ProcessRunner.ProcessRunner, {
+            run: () => Effect.die("Docker is not used here"),
+          }),
+        ),
+        Layer.provide(Layer.succeed(HttpClient.HttpClient, client)),
+        Layer.provide(NodeCrypto.layer),
+        Layer.provideMerge(
+          Layer.fresh(ServerConfig.layerTest(process.cwd(), { prefix: "t3code-cube-test-" })),
+        ),
+        Layer.provideMerge(NodeServices.layer),
+      );
+      return { layer, pushed };
+    };
+
+    it.effect("hands cube management and the Fly token to the home, then pairs with it", () => {
+      const home = homeLayer(false);
+      return Effect.gen(function* () {
+        const cubes = yield* CubeService.CubeService;
+        const pairing = yield* cubes.createHome;
+        expect(pairing.httpBaseUrl).toMatch(/^https:\/\/t3-home-[a-z0-9]+\.fly\.dev$/);
+        expect(pairing.credential).toBe("HOMEPAIR");
+        expect(home.pushed).toEqual([
+          {
+            authorization: "Bearer home-session-token",
+            body: expect.objectContaining({
+              enableCubes: true,
+              cubeBackend: "fly",
+              cubeFly: FLY,
+              cubeImage: "registry.fly.io/cube:test",
+              cubeEnvironment: [
+                { name: "CLAUDE_CODE_OAUTH_TOKEN", value: "sk-ant-oat-secret", sensitive: true },
+              ],
+            }),
+          },
+        ]);
+        const settings = yield* (yield* ServerSettings.ServerSettingsService).getSettings;
+        expect(settings.enableCubes).toBe(false);
+        expect(settings.cubeFly.apiToken).toBe("");
+      }).pipe(Effect.provide(home.layer));
+    });
+
+    it.effect("keeps managing cubes here when the home does not take over", () => {
+      const home = homeLayer(true);
+      return Effect.gen(function* () {
+        const cubes = yield* CubeService.CubeService;
+        const error = yield* cubes.createHome.pipe(Effect.flip);
+        expect(error._tag).toBe("CubeOperationError");
+        const settings = yield* (yield* ServerSettings.ServerSettingsService).getSettings;
+        expect(settings.enableCubes).toBe(true);
+        expect(settings.cubeFly.apiToken).toBe(FLY.apiToken);
+      }).pipe(Effect.provide(home.layer));
+    });
   });
 });

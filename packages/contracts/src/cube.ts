@@ -117,6 +117,7 @@ export class CubeOperationError extends Schema.TaggedError<CubeOperationError>()
       "park",
       "claim",
       "clone",
+      "home",
     ]),
     id: Schema.optional(Schema.String),
     cause: Schema.optional(Schema.Defect()),
@@ -126,6 +127,7 @@ export class CubeOperationError extends Schema.TaggedError<CubeOperationError>()
   override get message(): string {
     if (this.operation === "account") return "Could not look up the Fly account.";
     if (this.operation === "clone") return "Could not clone the repository into the cube.";
+    if (this.operation === "home") return "Could not set up the cube home on Fly.";
     return this.id === undefined
       ? `Could not ${this.operation} cubes.`
       : `Could not ${this.operation} cube ${this.id}.`;

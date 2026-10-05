@@ -2,6 +2,7 @@ import { EnvironmentRegistry } from "@t3tools/client-runtime/connection";
 import {
   changeCubeEnvironment,
   createCubeEnvironmentAtoms,
+  createCubeHome,
   ensureCubeEnvironment,
   findCubeByEnvironment,
   type CubeChange,
@@ -35,6 +36,19 @@ const recordHostCubes = (hostEnvironmentId: EnvironmentId, cubes: ReadonlyArray<
     next.set(hostEnvironmentId, cubes);
     appAtomRegistry.set(hostCubesAtom, next);
   });
+
+/**
+ * Drops the lists of environments that no longer manage cubes, such as one
+ * that handed them to a cube home, so cubes are found through their host.
+ */
+export const keepCubeHosts = (hostEnvironmentIds: ReadonlySet<EnvironmentId>) => {
+  const current = appAtomRegistry.get(hostCubesAtom);
+  if ([...current.keys()].every((id) => hostEnvironmentIds.has(id))) return;
+  appAtomRegistry.set(
+    hostCubesAtom,
+    new Map([...current].filter(([id]) => hostEnvironmentIds.has(id))),
+  );
+};
 
 /** Changes in flight per cube id, so every surface can show a cube waking or stopping. */
 const pendingCubeChangesAtom = Atom.make<ReadonlyMap<string, CubeChange>>(new Map()).pipe(
@@ -116,6 +130,20 @@ export const syncCubes = createRuntimeCommand(connectionAtomRuntime, {
     syncCubeEnvironments(hostEnvironmentId).pipe(
       Effect.tap((cubes) => recordHostCubes(hostEnvironmentId, cubes)),
     ),
+});
+
+/**
+ * Moves a host's cube management to the cube home on Fly and connects to the
+ * home, returning its environment.
+ */
+export const createHome = createRuntimeCommand(connectionAtomRuntime, {
+  label: "web:cube:create-home",
+  scheduler: cubeScheduler,
+  concurrency: {
+    mode: "singleFlight",
+    key: (hostEnvironmentId: EnvironmentId) => hostEnvironmentId,
+  },
+  execute: (hostEnvironmentId: EnvironmentId) => createCubeHome(hostEnvironmentId),
 });
 
 /** Pairs with a running cube and registers it, returning its environment. */

@@ -1,9 +1,11 @@
 import type { EnvironmentId, CubeBackend, CubeSize, ServerSettingsPatch } from "@t3tools/contracts";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
+import { environmentCatalog } from "../../connection/catalog";
 import { useEnvironmentSettings } from "../../hooks/useSettings";
-import { cubeEnvironment } from "../../state/cube";
+import { createHome, cubeEnvironment } from "../../state/cube";
+import { useEnvironments } from "../../state/environments";
 import { serverEnvironment } from "../../state/server";
 import { useEnvironmentQuery } from "../../state/query";
 import { useAtomCommand } from "../../state/use-atom-command";
@@ -38,6 +40,15 @@ export function CubesSettingsPanel() {
 
 function CubeSettings() {
   const { scope, environment, connectedEnvironments } = useSettingsScope();
+  const connect = useAtomCommand(environmentCatalog.connect, { reportFailure: false });
+  // A cube home sleeps until needed, and opening its settings is a need.
+  const sleepingEnvironmentId =
+    environment?.entry.connectWhen === "needed" && environment.connection.phase !== "connected"
+      ? environment.environmentId
+      : null;
+  useEffect(() => {
+    if (sleepingEnvironmentId !== null) void connect(sleepingEnvironmentId);
+  }, [sleepingEnvironmentId, connect]);
   if (scope.kind === "project" || scope.kind === "checkout") return null;
   const environmentId =
     environment?.connection.phase === "connected" ? environment.environmentId : null;
@@ -49,7 +60,9 @@ function CubeSettings() {
     >
       {environmentId === null ? (
         <p className="px-4 py-3 text-sm text-muted-foreground">
-          Connect an environment to host cubes on it.
+          {sleepingEnvironmentId === null
+            ? "Connect an environment to host cubes on it."
+            : `Waking ${environment?.label ?? "it"}…`}
         </p>
       ) : (
         // Drafts belong to one environment; switching must not carry them over.
@@ -98,12 +111,28 @@ function CubeControls({ environmentId }: { readonly environmentId: EnvironmentId
   });
   const save = (patch: ServerSettingsPatch) => updateSettings({ environmentId, input: { patch } });
   const fly = settings.cubeBackend === "fly";
+  const { environments } = useEnvironments();
+  const self = environments.find((environment) => environment.environmentId === environmentId);
+  const isHome = self?.serverConfig?.environment.capabilities.wakesOnRequest === true;
+  // Where cubes are managed instead, such as the cube home they moved to.
+  const otherHost = settings.enableCubes
+    ? undefined
+    : environments.find(
+        (environment) =>
+          environment.environmentId !== environmentId &&
+          environment.entry.enabled &&
+          environment.serverConfig?.settings.enableCubes === true,
+      );
 
   return (
     <>
       <SettingsRow
         {...searchableSetting("cubes-enabled")}
-        description="Create cubes, each a separate environment for one task, with this machine's Docker or on Fly.io."
+        description={
+          otherHost
+            ? `${otherHost.label} manages your cubes.`
+            : "Create cubes, each a separate environment for one task, with this machine's Docker or on Fly.io."
+        }
         control={
           <Switch
             checked={settings.enableCubes}
@@ -142,6 +171,7 @@ function CubeControls({ environmentId }: { readonly environmentId: EnvironmentId
             }
           />
           {fly ? <FlySettings environmentId={environmentId} save={save} /> : null}
+          {fly && !isHome ? <CubeHomeSetting environmentId={environmentId} /> : null}
           <SettingsRow
             {...searchableSetting("cube-size")}
             description="How much machine each new cube gets. Builds and large test suites want medium or more."
@@ -288,6 +318,51 @@ function CubeControls({ environmentId }: { readonly environmentId: EnvironmentId
         </>
       ) : null}
     </>
+  );
+}
+
+/**
+ * Hands cube management to a cube home on Fly: a small machine that sleeps
+ * while no one is using it, so cubes can be made and managed from any device
+ * with this one off. This server then stops managing cubes and forgets its
+ * Fly token, and this setting disappears with the rest.
+ */
+function CubeHomeSetting({ environmentId }: { readonly environmentId: EnvironmentId }) {
+  const hasToken = useEnvironmentSettings(
+    environmentId,
+    (settings) => settings.cubeFly.apiToken.length > 0,
+  );
+  const move = useAtomCommand(createHome, { reportFailure: false });
+  const [moving, setMoving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  if (!hasToken) return null;
+
+  const start = async () => {
+    setMoving(true);
+    setError(null);
+    const result = await move(environmentId);
+    setMoving(false);
+    if (result._tag === "Failure") {
+      const failure = squashAtomCommandFailure(result);
+      setError(failure instanceof Error ? failure.message : "The cube home could not be set up.");
+    }
+  };
+
+  return (
+    <SettingsRow
+      {...searchableSetting("cube-home")}
+      description={
+        error ??
+        (moving
+          ? "Setting up the cube home on Fly. This takes about a minute."
+          : "Manage cubes from a small Fly machine that sleeps when no one is using it, so they keep working with this computer off. Costs cents a month. This server stops managing cubes and forgets its Fly token.")
+      }
+      control={
+        <Button size="sm" variant="outline" disabled={moving} onClick={() => void start()}>
+          {moving ? "Moving…" : "Move to Fly"}
+        </Button>
+      }
+    />
   );
 }
 

@@ -14,7 +14,11 @@ import type { ConnectionCatalogEntry, ConnectWhen } from "../connection/catalog.
 import * as ConnectionOnboarding from "../connection/onboarding.ts";
 import * as EnvironmentRegistry from "../connection/registry.ts";
 import { request } from "../rpc/client.ts";
-import { createEnvironmentRpcCommand, createEnvironmentRpcQueryAtomFamily } from "./runtime.ts";
+import {
+  connectIfNeeded,
+  createEnvironmentRpcCommand,
+  createEnvironmentRpcQueryAtomFamily,
+} from "./runtime.ts";
 
 /** Commands against a host environment's cube service. */
 export function createCubeEnvironmentAtoms<R, E>(
@@ -45,6 +49,40 @@ export function createCubeEnvironmentAtoms<R, E>(
     }),
   };
 }
+
+/**
+ * Runs a request on a cube's host, waking it first if it sleeps until needed
+ * (a cube home). Background syncs use `registry.run` instead, which never wakes.
+ */
+const onHost = <A, E, R>(hostEnvironmentId: EnvironmentId, effect: Effect.Effect<A, E, R>) =>
+  connectIfNeeded(hostEnvironmentId).pipe(
+    Effect.andThen(
+      EnvironmentRegistry.EnvironmentRegistry.pipe(
+        Effect.flatMap((registry) => registry.run(hostEnvironmentId, effect)),
+      ),
+    ),
+  );
+
+/**
+ * Moves cube management from a host to the cube home on Fly, which the host
+ * makes if there is none, and saves a connection to the home that connects
+ * when needed. Returns the home's environment.
+ */
+export const createCubeHome = Effect.fn("clientRuntime.cube.createHome")(function* (
+  hostEnvironmentId: EnvironmentId,
+) {
+  const onboarding = yield* ConnectionOnboarding.ConnectionOnboarding;
+  const registry = yield* EnvironmentRegistry.EnvironmentRegistry;
+  const pairing = yield* onHost(hostEnvironmentId, request(WS_METHODS.cubeCreateHome, {}));
+  const environmentId = yield* onboarding.registerPairing({
+    host: pairing.httpBaseUrl,
+    pairingCode: pairing.credential,
+    connectWhen: "needed",
+  });
+  // Its cubes are wanted now, and its settings for showing them.
+  yield* registry.ensureConnected(environmentId, "60 seconds").pipe(Effect.ignore);
+  return environmentId;
+});
 
 /** A cube and the host environment that owns it. */
 export interface HostedCube {
@@ -107,10 +145,7 @@ const registerCubeEnvironment = Effect.fn("clientRuntime.cube.ensureEnvironment"
   const entry = (yield* SubscriptionRef.get(registry.entries)).get(target.environmentId);
   const action = cubeRegistrationAction(entry, target.httpBaseUrl);
   if (action.kind === "register") {
-    const pairing = yield* registry.run(
-      hostEnvironmentId,
-      request(WS_METHODS.cubePair, { id: cube.id }),
-    );
+    const pairing = yield* onHost(hostEnvironmentId, request(WS_METHODS.cubePair, { id: cube.id }));
     return yield* onboarding.registerPairing({
       host: pairing.httpBaseUrl,
       pairingCode: pairing.credential,
@@ -253,7 +288,7 @@ export const changeCubeEnvironment = Effect.fn("clientRuntime.cube.change")(func
   const registry = yield* EnvironmentRegistry.EnvironmentRegistry;
   switch (change) {
     case "start": {
-      const started = yield* registry.run(
+      const started = yield* onHost(
         hostEnvironmentId,
         request(WS_METHODS.cubeStart, { id: cube.id }),
       );
@@ -280,14 +315,14 @@ export const changeCubeEnvironment = Effect.fn("clientRuntime.cube.change")(func
       if (cube.environmentId !== null) {
         yield* registry.setEnabled(cube.environmentId, false).pipe(Effect.ignore);
       }
-      yield* registry.run(hostEnvironmentId, request(WS_METHODS.cubeStop, { id: cube.id }));
+      yield* onHost(hostEnvironmentId, request(WS_METHODS.cubeStop, { id: cube.id }));
       break;
     case "remove":
-      yield* registry.run(hostEnvironmentId, request(WS_METHODS.cubeRemove, { id: cube.id }));
+      yield* onHost(hostEnvironmentId, request(WS_METHODS.cubeRemove, { id: cube.id }));
       if (cube.environmentId !== null) {
         yield* registry.remove(cube.environmentId).pipe(Effect.ignore);
       }
       break;
   }
-  return yield* registry.run(hostEnvironmentId, request(WS_METHODS.cubeList, {}));
+  return yield* onHost(hostEnvironmentId, request(WS_METHODS.cubeList, {}));
 });

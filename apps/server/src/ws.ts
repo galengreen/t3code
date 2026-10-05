@@ -3593,6 +3593,10 @@ const makeWsRpcLayer = (
           observeRpcEffect(WS_METHODS.cubeSleep, idleShutdown.sleepNow, {
             "rpc.aggregate": "cube",
           }),
+        [WS_METHODS.cubeCreateHome]: (_input) =>
+          observeRpcEffect(WS_METHODS.cubeCreateHome, cubeService.createHome, {
+            "rpc.aggregate": "cube",
+          }),
         [WS_METHODS.cubeFlyAccount]: (input) =>
           observeRpcEffect(WS_METHODS.cubeFlyAccount, cubeService.flyAccount(input), {
             "rpc.aggregate": "cube",

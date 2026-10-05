@@ -60,21 +60,37 @@ resulting disconnect.
 
 ### Cubes
 
-A host environment can create cubes: Docker containers that each run their
-own T3 server, so a paired client sees a complete environment. The
-[cube service](../../apps/server/src/cube/CubeService.ts) only creates,
-starts, stops, removes, and mints pairing credentials; it never runs work inside
-one. Docker is the record: containers carry `t3code.cube.*` labels and are
-read back with `docker inspect`, so there is no cube table to drift.
+A host environment can create cubes: machines (Docker containers or Fly
+Machines) that each run their own T3 server, so a paired client sees a complete
+environment. The [cube service](../../apps/server/src/cube/CubeService.ts)
+only creates, wakes, removes, and pairs cubes; it never runs work inside one.
+The backend is the record (Docker labels, Fly app names and machine metadata),
+so there is no cube table to drift.
 
-The product calls them cubes (UI copy, errors, `t3 cube`). Code, contracts, RPC
-methods, settings keys, and container labels keep `cube`, so renaming the
-product term never touches the wire or stored state.
+Fly cubes sleep themselves when their agent is idle
+([`IdleShutdown`](../../apps/server/src/cube/IdleShutdown.ts)), and Fly wakes
+a sleeping machine for any request. So clients must not hold standing
+connections to them: each retry would wake the machine again. A server that
+sleeps this way advertises `wakesOnRequest`, and clients switch its saved
+connection to `connectWhen: "needed"`, connecting on opening a thread, sending,
+or other need rather than in the background. The same holds for the cube home
+below. Docker cubes cannot wake on request and keep ordinary connections.
 
-Clients connect to a cube directly, at `cubePublishHost` (loopback by
-default, so only clients on the host machine). Docker assigns a new port each
-time a cube starts, so a client cannot keep a cube's address. Instead each
-client re-resolves its cubes from the host:
+Only one server may manage cubes on an account. Each manager keeps exactly one
+spare and deletes spares it does not expect, so two managers delete each
+other's. Moving management to the cube home therefore turns cubes off on the
+old host and clears its Fly token before the home takes over.
+
+The cube home is a small Fly machine running the cube image with no projects.
+It sleeps when no client has the app in the foreground and no cube work is
+running, so cubes can be made and managed with every computer of the user's
+off. Its hourly prune and spare checks run by the wall clock, checked every
+minute, because a suspended machine's timers do not count the time it slept.
+Pruning destroys a machine without `force`, which Fly refuses for a started
+one, so a cube woken after the eligibility check is never deleted.
+
+Docker publishes a cube on a new port each time it starts, so clients
+re-resolve their cubes from the host:
 [`syncCubeEnvironments`](../../packages/client-runtime/src/state/cube.ts)
 registers ones it has not seen and moves saved ones to their current port,
 keyed by the cube's environment ID, which survives restarts. A published

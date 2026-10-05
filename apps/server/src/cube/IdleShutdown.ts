@@ -11,6 +11,11 @@
  * it awake too. Clients being connected, or browsing the cube, do not
  * count. Waking (boot, resume) only earns a short grace, enough to send a
  * message, so a stray request does not keep a cube up for the full window.
+ *
+ * A cube home sets `T3CODE_SLEEP_WHEN_UNUSED_MINUTES` instead: it runs no
+ * agents, so it counts use instead of work. A client showing the app keeps it
+ * awake (clients report that every 25 seconds, and a report lapses after 45),
+ * and so does cube work under way, such as refilling the spare.
  */
 import { CubeUnavailableError } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
@@ -29,8 +34,10 @@ import * as Schedule from "effect/Schedule";
 import { HttpClient, HttpClientRequest } from "effect/unstable/http";
 import * as NodeHttpClient from "@effect/platform-node/NodeHttpClient";
 
+import * as BackgroundPolicy from "../background/BackgroundPolicy.ts";
 import * as ServerConfig from "../config.ts";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
+import * as CubeService from "./CubeService.ts";
 
 const CHECK_INTERVAL = Duration.seconds(30);
 /**
@@ -73,10 +80,20 @@ const toMillis = (value: DateTime.Utc | null | undefined) =>
  */
 export const make = (options: { readonly sleep: Effect.Effect<void> }) =>
   Effect.gen(function* () {
-    const minutes = yield* Config.Int("T3CODE_SLEEP_WHEN_IDLE_MINUTES").pipe(Config.option);
-    const enabled = Option.isSome(minutes) && minutes.value > 0;
+    const positive = Option.filter((value: number) => value > 0);
+    const unusedMinutes = positive(
+      yield* Config.Int("T3CODE_SLEEP_WHEN_UNUSED_MINUTES").pipe(Config.option),
+    );
+    const idleMinutes = positive(
+      yield* Config.Int("T3CODE_SLEEP_WHEN_IDLE_MINUTES").pipe(Config.option),
+    );
+    const home = Option.isSome(unusedMinutes);
+    const minutes = home ? unusedMinutes : idleMinutes;
+    const enabled = Option.isSome(minutes);
     const idleAfterMs = Duration.toMillis(Duration.minutes(Option.getOrElse(minutes, () => 0)));
     const threads = yield* ThreadManagementService.ThreadManagementService;
+    const backgroundPolicy = yield* BackgroundPolicy.BackgroundPolicy;
+    const cubes = yield* CubeService.CubeService;
     const fileSystem = yield* FileSystem.FileSystem;
     const preparingPidPath = (yield* Path.Path).join(
       (yield* ServerConfig.ServerConfig).baseDir,
@@ -103,11 +120,22 @@ export const make = (options: { readonly sleep: Effect.Effect<void> }) =>
       Effect.orElseSucceed(() => false),
     );
 
+    /** A home's use: someone showing the app, or cube work under way. */
+    const use = Effect.gen(function* () {
+      const policy = yield* backgroundPolicy.snapshot;
+      const cubeWork = yield* cubes.work;
+      return {
+        running: policy.activeForegroundLeaseCount > 0 || cubeWork.busy,
+        preparing: false,
+        latestWorkAt: cubeWork.lastWorkAt,
+      };
+    });
+
     /**
      * What the threads say: whether a run is in progress, and the newest run
      * request or completion, which catches turns too short for the sampling.
      */
-    const work = Effect.gen(function* () {
+    const agentWork = Effect.gen(function* () {
       const snapshot = yield* threads.getShellSnapshot({ location: "active" });
       return {
         running: snapshot.threads.some((thread) => thread.activeRunId !== null),
@@ -121,6 +149,7 @@ export const make = (options: { readonly sleep: Effect.Effect<void> }) =>
         ),
       };
     });
+    const work = home ? use : agentWork;
 
     const goToSleep = (reason: string) =>
       Effect.gen(function* () {
@@ -148,7 +177,9 @@ export const make = (options: { readonly sleep: Effect.Effect<void> }) =>
       // A message may have arrived since the first look.
       const again = yield* work;
       if (again.running || again.preparing || again.latestWorkAt > workedAt) return;
-      yield* goToSleep(`idle for ${minutes.pipe(Option.getOrElse(() => 0))} minutes`);
+      yield* goToSleep(
+        `${home ? "unused" : "idle"} for ${Option.getOrElse(minutes, () => 0)} minutes`,
+      );
     }).pipe(Effect.catchCause((cause) => Effect.logWarning("Idle check failed", { cause })));
 
     if (enabled) {
@@ -156,7 +187,8 @@ export const make = (options: { readonly sleep: Effect.Effect<void> }) =>
     }
 
     const sleepNow = Effect.gen(function* () {
-      if (!enabled) {
+      // A home sleeps once unused; being asked means someone is using it.
+      if (!enabled || home) {
         return yield* new CubeUnavailableError({ reason: "This server does not sleep." });
       }
       const current = yield* work.pipe(

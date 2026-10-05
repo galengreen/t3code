@@ -445,6 +445,7 @@ const makeHarness = Effect.fn("TestEnvironmentRegistry.makeHarness")(function* (
     storedCredentials,
     storedRemoteTokens,
     storedDisabled,
+    storedOnDemand,
     disconnectedSshTargets,
     networkStatus,
   };
@@ -1677,6 +1678,29 @@ describe("EnvironmentRegistry environments that connect when needed", () => {
           desired: false,
           phase: "available",
         });
+      }).pipe(Effect.provide(harness.layer));
+    }),
+  );
+
+  it.effect("stays connected when an environment in use turns out to sleep", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness([TARGET]);
+      yield* Effect.gen(function* () {
+        const registry = yield* EnvironmentRegistry.EnvironmentRegistry;
+        yield* registry.start;
+        yield* awaitConnectionState(
+          registry,
+          TARGET.environmentId,
+          (state) => state.phase === "connected",
+        );
+        yield* registry.setConnectWhen(TARGET.environmentId, "needed");
+        yield* awaitConnectionState(
+          registry,
+          TARGET.environmentId,
+          (state) => state.phase === "connected",
+        );
+        expect(yield* registry.state(TARGET.environmentId)).toMatchObject({ desired: true });
+        expect(yield* Ref.get(harness.storedOnDemand)).toContain(TARGET.environmentId);
       }).pipe(Effect.provide(harness.layer));
     }),
   );

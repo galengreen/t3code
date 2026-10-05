@@ -21,6 +21,7 @@
  */
 import {
   EnvironmentId,
+  type CubeError,
   CubeNotFoundError,
   CubeOperationError,
   CubeUnavailableError,
@@ -35,10 +36,11 @@ import * as Schema from "effect/Schema";
 import { HttpClient, HttpClientRequest } from "effect/unstable/http";
 
 import * as ServerSettings from "../serverSettings.ts";
-import type { CubeDriver, CubeMachine, CubeOperation } from "./CubeDriver.ts";
+import type { CubeDriver, CubeMachine, CubeMachineSpec, CubeOperation } from "./CubeDriver.ts";
 
 const API_BASE = "https://api.machines.dev";
 const APP_PREFIX = "t3-cube-";
+const HOME_PREFIX = "t3-home-";
 const SPARE_METADATA = "t3code_cube_spare";
 const CUBE_PORT = 7777;
 /** The first start in a region pulls the image, which can take minutes. */
@@ -255,6 +257,48 @@ export const flyAccount = Effect.fn("FlyCubeDriver.account")(function* (token: s
   } satisfies CubeFlyAccount;
 });
 
+/** A machine's size and identity, whatever it is for. */
+interface AppMachineSpec {
+  readonly image: string;
+  readonly guest: (typeof GUESTS)[CubeSize];
+  readonly metadata: Record<string, string>;
+  readonly environment: CubeMachineSpec["environment"];
+}
+
+/**
+ * The cube home: one small machine, `t3-home-<id>`, that manages cubes from
+ * Fly so they need no computer of the user's to be on. It runs the cube image
+ * without a repository and sleeps when no one is using it. It is never listed,
+ * claimed, or pruned as a cube.
+ */
+export interface FlyHome {
+  readonly app: string;
+  readonly httpBaseUrl: string;
+}
+
+export interface FlyCubeDriver extends CubeDriver {
+  /** The organization's cube home, if one was made. */
+  readonly findHome: Effect.Effect<FlyHome | null, CubeError>;
+  /** Makes and boots a cube home; its server may still be starting when this returns. */
+  readonly createHome: (spec: {
+    readonly id: CubeId;
+    readonly environmentId: EnvironmentId;
+    readonly image: string;
+    readonly environment: CubeMachineSpec["environment"];
+  }) => Effect.Effect<FlyHome, CubeError>;
+  /** Runs a command as the image's user in the cube home. */
+  readonly execHome: (
+    home: FlyHome,
+    command: ReadonlyArray<string>,
+  ) => Effect.Effect<string, CubeError>;
+}
+
+/**
+ * A server that only manages cubes, with room for the `t3` commands run in it
+ * beside the server (512 MB ran out), and small enough to suspend.
+ */
+const HOME_GUEST = { cpu_kind: "shared", cpus: 1, memory_mb: 1024 } as const;
+
 export const make = Effect.gen(function* () {
   const settings = yield* ServerSettings.ServerSettingsService;
   const call = makeCall(yield* HttpClient.HttpClient);
@@ -284,16 +328,18 @@ export const make = Effect.gen(function* () {
         Effect.mapError((cause) => new CubeOperationError({ operation, id, cause })),
       );
 
-  /** The cube's one machine; not found once its app is gone. */
-  const machineOf = (token: string, id: CubeId, operation: CubeOperation) =>
-    call(token, "GET", `/v1/apps/${appName(id)}/machines`, operation, id).pipe(
+  /** An app's one machine; not found once the app is gone. */
+  const machineOf = (token: string, app: string, operation: CubeOperation, id?: CubeId) =>
+    call(token, "GET", `/v1/apps/${app}/machines`, operation, id).pipe(
       Effect.flatMap((response) =>
         response.status === 404
-          ? Effect.fail(new CubeNotFoundError({ id }))
+          ? Effect.fail(new CubeNotFoundError({ id: id ?? app }))
           : expectOk(response, operation, id).pipe(
               Effect.flatMap(decodeOr(decodeAppMachines)(operation, id)),
               Effect.flatMap(([machine]) =>
-                machine ? Effect.succeed(machine) : Effect.fail(new CubeNotFoundError({ id })),
+                machine
+                  ? Effect.succeed(machine)
+                  : Effect.fail(new CubeNotFoundError({ id: id ?? app })),
               ),
             ),
       ),
@@ -302,16 +348,17 @@ export const make = Effect.gen(function* () {
   /** Fly holds each wait for at most a minute and answers 408 when it runs out. */
   const waitFor = Effect.fn("FlyCubeDriver.waitFor")(function* (
     token: string,
-    id: CubeId,
+    app: string,
     machineId: string,
     state: "started" | "stopped" | "suspended",
     operation: CubeOperation,
+    id?: CubeId,
   ) {
     for (let waited = 0; waited < START_TIMEOUT_SECONDS; waited += WAIT_SECONDS) {
       const response = yield* call(
         token,
         "GET",
-        `/v1/apps/${appName(id)}/machines/${machineId}/wait?state=${state}&timeout=${WAIT_SECONDS}`,
+        `/v1/apps/${app}/machines/${machineId}/wait?state=${state}&timeout=${WAIT_SECONDS}`,
         operation,
         id,
       );
@@ -324,51 +371,42 @@ export const make = Effect.gen(function* () {
     });
   });
 
-  const list: CubeDriver["list"] = Effect.gen(function* () {
-    const fly = yield* configured;
-    if (!fly) return [];
-    const machines: CubeMachine[] = [];
-    let cursor: string | null | undefined;
-    do {
-      const query = `include_deleted=false${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`;
-      const page = yield* call(
-        fly.apiToken,
-        "GET",
-        `/v1/orgs/${encodeURIComponent(fly.organization)}/machines?${query}`,
-        "list",
-      ).pipe(
-        Effect.flatMap((response) => expectOk(response, "list")),
-        Effect.flatMap(decodeOr(decodeOrgMachines)("list")),
-      );
-      for (const machine of page.machines ?? []) {
-        const cube = machine.app_name ? toMachine(machine.app_name, machine) : null;
-        if (cube && machine.state !== "destroyed") machines.push(cube);
-      }
-      cursor = page.next_cursor;
-    } while (cursor);
-    return machines;
-  });
+  /** Every machine in the organization, across pages. */
+  const listMachines = (fly: { readonly apiToken: string; readonly organization: string }) =>
+    Effect.gen(function* () {
+      const machines: MachineSummary[] = [];
+      let cursor: string | null | undefined;
+      do {
+        const query = `include_deleted=false${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`;
+        const page = yield* call(
+          fly.apiToken,
+          "GET",
+          `/v1/orgs/${encodeURIComponent(fly.organization)}/machines?${query}`,
+          "list",
+        ).pipe(
+          Effect.flatMap((response) => expectOk(response, "list")),
+          Effect.flatMap(decodeOr(decodeOrgMachines)("list")),
+        );
+        machines.push(...(page.machines ?? []).filter((machine) => machine.state !== "destroyed"));
+        cursor = page.next_cursor;
+      } while (cursor);
+      return machines;
+    });
 
-  const find: CubeDriver["find"] = (id, operation) =>
-    configured.pipe(
-      Effect.flatMap((fly) =>
-        fly
-          ? machineOf(fly.apiToken, id, operation).pipe(
-              Effect.flatMap((machine) => {
-                const cube = toMachine(appName(id), machine);
-                return cube ? Effect.succeed(cube) : Effect.fail(new CubeNotFoundError({ id }));
-              }),
-            )
-          : Effect.fail(new CubeNotFoundError({ id })),
-      ),
-    );
-
-  const create: CubeDriver["create"] = Effect.fn("FlyCubeDriver.create")(function* (spec) {
+  /**
+   * Makes an app with its own addresses and one booted machine that a request
+   * wakes. A half-built app is deleted, including when this is interrupted.
+   */
+  const createApp = Effect.fn("FlyCubeDriver.createApp")(function* (
+    app: string,
+    spec: AppMachineSpec,
+    operation: CubeOperation,
+    id?: CubeId,
+  ) {
     const fly = yield* requireConfigured;
-    const app = appName(spec.id);
     const post = (path: string, body: unknown) =>
-      call(fly.apiToken, "POST", path, "create", spec.id, body).pipe(
-        Effect.flatMap((response) => expectOk(response, "create", spec.id)),
+      call(fly.apiToken, "POST", path, operation, id, body).pipe(
+        Effect.flatMap((response) => expectOk(response, operation, id)),
       );
 
     yield* post("/v1/apps", { name: app, org_slug: fly.organization });
@@ -382,7 +420,7 @@ export const make = Effect.gen(function* () {
         Object.keys(secrets).length === 0
           ? undefined
           : (yield* post(`/v1/apps/${app}/secrets`, { values: secrets }).pipe(
-              Effect.flatMap(decodeOr(decodeSecretsVersion)("create", spec.id)),
+              Effect.flatMap(decodeOr(decodeSecretsVersion)(operation, id)),
             )).version;
       const machine = yield* post(`/v1/apps/${app}/machines`, {
         name: "cube",
@@ -393,23 +431,18 @@ export const make = Effect.gen(function* () {
           env: Object.fromEntries(
             spec.environment.filter((v) => !v.sensitive).map((v) => [v.name, v.value]),
           ),
-          guest: GUESTS[spec.size],
+          guest: spec.guest,
           rootfs: { persist: "always" },
-          // The cube's server exits when it has been idle, which must stop
-          // the machine rather than restart it.
+          // The server exits when it has been idle and cannot suspend, which
+          // must stop the machine rather than restart it.
           restart: { policy: "no" },
-          metadata: {
-            t3code_cube: "1",
-            t3code_cube_label: spec.label,
-            t3code_cube_environment: spec.environmentId,
-            ...(spec.spare === null ? {} : { [SPARE_METADATA]: spec.spare }),
-          },
+          metadata: spec.metadata,
           services: [
             {
               protocol: "tcp",
               internal_port: CUBE_PORT,
-              // A request wakes a sleeping cube; clients connect only when
-              // they need it, and the cube sleeps itself when idle.
+              // A request wakes a sleeping machine; clients connect only when
+              // they need it, and the machine sleeps itself when idle.
               autostart: true,
               autostop: "off",
               ports: [
@@ -429,21 +462,91 @@ export const make = Effect.gen(function* () {
               }),
             ),
         ),
-        Effect.flatMap(decodeOr(decodeMachine)("create", spec.id)),
+        Effect.flatMap(decodeOr(decodeMachine)(operation, id)),
       );
-      yield* waitFor(fly.apiToken, spec.id, machine.id, "started", "create");
+      yield* waitFor(fly.apiToken, app, machine.id, "started", operation, id);
     }).pipe(
-      // A half-built app would keep billing for its IPs and machine, so take it
-      // down, including when the create is interrupted.
+      // A half-built app would keep billing for its IPs and machine.
       Effect.onError(() =>
-        call(fly.apiToken, "DELETE", `/v1/apps/${app}`, "create", spec.id).pipe(Effect.ignore),
+        call(fly.apiToken, "DELETE", `/v1/apps/${app}`, operation, id).pipe(Effect.ignore),
       ),
     );
   });
 
+  /** Runs a command as the image's `dev` user; Fly itself execs as root. */
+  const execIn = Effect.fn("FlyCubeDriver.exec")(function* (
+    app: string,
+    command: ReadonlyArray<string>,
+    operation: CubeOperation,
+    id?: CubeId,
+  ) {
+    const fly = yield* requireConfigured;
+    const machine = yield* machineOf(fly.apiToken, app, operation, id);
+    const result = yield* call(
+      fly.apiToken,
+      "POST",
+      `/v1/apps/${app}/machines/${machine.id}/exec`,
+      operation,
+      id,
+      {
+        // A login shell as `dev` gets the image user's PATH and home.
+        command: ["su", "-l", "dev", "-c", shellJoin(command)],
+        timeout: 60,
+      },
+    ).pipe(
+      Effect.flatMap((response) => expectOk(response, operation, id)),
+      Effect.flatMap(decodeOr(decodeExec)(operation, id)),
+    );
+    if ((result.exit_code ?? 0) !== 0) {
+      return yield* new CubeOperationError({ operation, id, cause: result.stderr ?? "" });
+    }
+    return result.stdout ?? "";
+  });
+
+  const list: CubeDriver["list"] = Effect.gen(function* () {
+    const fly = yield* configured;
+    if (!fly) return [];
+    return (yield* listMachines(fly)).flatMap((machine) => {
+      const cube = machine.app_name ? toMachine(machine.app_name, machine) : null;
+      return cube ? [cube] : [];
+    });
+  });
+
+  const find: CubeDriver["find"] = (id, operation) =>
+    configured.pipe(
+      Effect.flatMap((fly) =>
+        fly
+          ? machineOf(fly.apiToken, appName(id), operation, id).pipe(
+              Effect.flatMap((machine) => {
+                const cube = toMachine(appName(id), machine);
+                return cube ? Effect.succeed(cube) : Effect.fail(new CubeNotFoundError({ id }));
+              }),
+            )
+          : Effect.fail(new CubeNotFoundError({ id })),
+      ),
+    );
+
+  const create: CubeDriver["create"] = (spec) =>
+    createApp(
+      appName(spec.id),
+      {
+        image: spec.image,
+        guest: GUESTS[spec.size],
+        metadata: {
+          t3code_cube: "1",
+          t3code_cube_label: spec.label,
+          t3code_cube_environment: spec.environmentId,
+          ...(spec.spare === null ? {} : { [SPARE_METADATA]: spec.spare }),
+        },
+        environment: spec.environment,
+      },
+      "create",
+      spec.id,
+    );
+
   const start: CubeDriver["start"] = Effect.fn("FlyCubeDriver.start")(function* (id) {
     const fly = yield* requireConfigured;
-    const machine = yield* machineOf(fly.apiToken, id, "start");
+    const machine = yield* machineOf(fly.apiToken, appName(id), "start", id);
     yield* call(
       fly.apiToken,
       "POST",
@@ -451,12 +554,12 @@ export const make = Effect.gen(function* () {
       "start",
       id,
     ).pipe(Effect.flatMap((response) => expectOk(response, "start", id)));
-    yield* waitFor(fly.apiToken, id, machine.id, "started", "start");
+    yield* waitFor(fly.apiToken, appName(id), machine.id, "started", "start", id);
   });
 
   const stop: CubeDriver["stop"] = Effect.fn("FlyCubeDriver.stop")(function* (id) {
     const fly = yield* requireConfigured;
-    const machine = yield* machineOf(fly.apiToken, id, "stop");
+    const machine = yield* machineOf(fly.apiToken, appName(id), "stop", id);
     yield* call(
       fly.apiToken,
       "POST",
@@ -467,16 +570,16 @@ export const make = Effect.gen(function* () {
         timeout: "10s",
       },
     ).pipe(Effect.flatMap((response) => expectOk(response, "stop", id)));
-    yield* waitFor(fly.apiToken, id, machine.id, "stopped", "stop");
+    yield* waitFor(fly.apiToken, appName(id), machine.id, "stopped", "stop", id);
   });
 
   const park: CubeDriver["park"] = Effect.fn("FlyCubeDriver.park")(function* (id) {
     const fly = yield* requireConfigured;
-    const machine = yield* machineOf(fly.apiToken, id, "park");
+    const machine = yield* machineOf(fly.apiToken, appName(id), "park", id);
     const path = `/v1/apps/${appName(id)}/machines/${machine.id}`;
     const suspended = yield* call(fly.apiToken, "POST", `${path}/suspend`, "park", id);
     if (suspended.status >= 200 && suspended.status < 300) {
-      yield* waitFor(fly.apiToken, id, machine.id, "suspended", "park");
+      yield* waitFor(fly.apiToken, appName(id), machine.id, "suspended", "park", id);
       return;
     }
     yield* Effect.logInfo("Fly could not suspend a spare cube; stopping it instead", {
@@ -486,12 +589,12 @@ export const make = Effect.gen(function* () {
     yield* call(fly.apiToken, "POST", `${path}/stop`, "park", id, { timeout: "10s" }).pipe(
       Effect.flatMap((response) => expectOk(response, "park", id)),
     );
-    yield* waitFor(fly.apiToken, id, machine.id, "stopped", "park");
+    yield* waitFor(fly.apiToken, appName(id), machine.id, "stopped", "park", id);
   });
 
   const claim: CubeDriver["claim"] = Effect.fn("FlyCubeDriver.claim")(function* (id) {
     const fly = yield* requireConfigured;
-    const machine = yield* machineOf(fly.apiToken, id, "claim");
+    const machine = yield* machineOf(fly.apiToken, appName(id), "claim", id);
     yield* call(
       fly.apiToken,
       "DELETE",
@@ -510,7 +613,7 @@ export const make = Effect.gen(function* () {
   const removeIfStopped: CubeDriver["removeIfStopped"] = Effect.fn("FlyCubeDriver.removeIfStopped")(
     function* (id) {
       const fly = yield* requireConfigured;
-      const machine = yield* machineOf(fly.apiToken, id, "remove");
+      const machine = yield* machineOf(fly.apiToken, appName(id), "remove", id);
       // Without `force`, Fly refuses to destroy a started machine, so a wake
       // that lands after this cube was found idle keeps it.
       const destroyed = yield* call(
@@ -533,29 +636,33 @@ export const make = Effect.gen(function* () {
     },
   );
 
-  const exec: CubeDriver["exec"] = Effect.fn("FlyCubeDriver.exec")(
-    function* (id, command, operation) {
-      const fly = yield* requireConfigured;
-      const machine = yield* machineOf(fly.apiToken, id, operation);
-      const result = yield* call(
-        fly.apiToken,
-        "POST",
-        `/v1/apps/${appName(id)}/machines/${machine.id}/exec`,
-        operation,
-        id,
+  const exec: CubeDriver["exec"] = (id, command, operation) =>
+    execIn(appName(id), command, operation, id);
+
+  const homeOf = (app: string): FlyHome => ({ app, httpBaseUrl: `https://${app}.fly.dev` });
+
+  const findHome: FlyCubeDriver["findHome"] = Effect.gen(function* () {
+    const fly = yield* requireConfigured;
+    const app = (yield* listMachines(fly)).find((machine) =>
+      machine.app_name?.startsWith(HOME_PREFIX),
+    )?.app_name;
+    return app === undefined ? null : homeOf(app);
+  });
+
+  const createHome: FlyCubeDriver["createHome"] = Effect.fn("FlyCubeDriver.createHome")(
+    function* (spec) {
+      const app = `${HOME_PREFIX}${spec.id}`;
+      yield* createApp(
+        app,
         {
-          // Fly execs as root; a login shell as `dev` gets the image user's PATH and home.
-          command: ["su", "-l", "dev", "-c", shellJoin(command)],
-          timeout: 60,
+          image: spec.image,
+          guest: HOME_GUEST,
+          metadata: { t3code_home: "1", t3code_home_environment: spec.environmentId },
+          environment: spec.environment,
         },
-      ).pipe(
-        Effect.flatMap((response) => expectOk(response, operation, id)),
-        Effect.flatMap(decodeOr(decodeExec)(operation, id)),
+        "home",
       );
-      if ((result.exit_code ?? 0) !== 0) {
-        return yield* new CubeOperationError({ operation, id, cause: result.stderr ?? "" });
-      }
-      return result.stdout ?? "";
+      return homeOf(app);
     },
   );
 
@@ -570,5 +677,8 @@ export const make = Effect.gen(function* () {
     remove,
     removeIfStopped,
     exec,
-  } satisfies CubeDriver;
+    findHome,
+    createHome,
+    execHome: (home, command) => execIn(home.app, command, "home"),
+  } satisfies FlyCubeDriver;
 });

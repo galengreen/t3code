@@ -3009,14 +3009,23 @@ export default function ChatView(props: ChatViewProps) {
       : clampFileAttachmentUploadBytes(advertisedFileAttachmentBytes);
   const envLocked = Boolean(activeThread && (activeMessageCount > 0 || activeRuntime !== null));
   // A new thread can start in a fresh cube when the project has a remote to
-  // clone and a host can make one: this environment, or, for a draft that is
-  // already in a cube, the host that made it.
+  // clone and a host can make one: for a draft already in a cube, the host
+  // that made it; otherwise this environment, or else any host this client
+  // knows, such as a cube home, which wakes when asked.
   const draftCube = useCubeForEnvironment(draftId ? environmentId : null);
-  const cubeHostEnvironmentId = draftCube?.hostEnvironmentId ?? environmentId;
+  const cubeHostEnvironmentId =
+    draftCube?.hostEnvironmentId ??
+    (settings.enableCubes
+      ? environmentId
+      : (environments.find(
+          (environment) =>
+            environment.entry.enabled && environment.serverConfig?.settings.enableCubes === true,
+        )?.environmentId ?? null));
   const cubeHostEnabled =
-    draftCube === null
+    cubeHostEnvironmentId === environmentId
       ? settings.enableCubes
-      : environmentById.get(cubeHostEnvironmentId)?.serverConfig?.settings.enableCubes === true;
+      : cubeHostEnvironmentId !== null &&
+        environmentById.get(cubeHostEnvironmentId)?.serverConfig?.settings.enableCubes === true;
   const cubeRepositoryUrl = activeProject?.repositoryIdentity?.locator.remoteUrl ?? null;
   const cubeAvailable = Boolean(draftId && !envLocked && cubeHostEnabled && cubeRepositoryUrl);
   const cubeUnavailableReason =
@@ -4538,6 +4547,7 @@ export default function ChatView(props: ChatViewProps) {
   // composer keeps the message meanwhile, so nothing is lost on a reload.
   const startCubeLaunch = () => {
     if (!cubeSelected || !activeProject || !cubeRepositoryUrl || !draftId) return;
+    if (!cubeHostEnvironmentId) return;
     if (cubeDraftLaunch.launching) return;
     setCubeLaunchPrompt(promptRef.current);
     void cubeDraftLaunch

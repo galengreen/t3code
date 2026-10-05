@@ -5,6 +5,7 @@ import {
   type ExecutionEnvironmentDescriptor,
 } from "@t3tools/contracts";
 import { HostProcessArchitecture, HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import * as Config from "effect/Config";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
@@ -204,6 +205,16 @@ export const make = Effect.gen(function* () {
   // the fd and correctly do not advertise.
   const desktopAppUpdate =
     serverSelfUpdate === "desktop-managed" && serverConfig.desktopTelemetryControlFd !== undefined;
+  // Cubes and the cube home on Fly sleep themselves (see IdleShutdown), and
+  // Fly wakes them for any request.
+  const sleepsOnFly = yield* Config.all([
+    Config.String("FLY_APP_NAME").pipe(Config.option),
+    Config.Int("T3CODE_SLEEP_WHEN_IDLE_MINUTES").pipe(Config.withDefault(0)),
+    Config.Int("T3CODE_SLEEP_WHEN_UNUSED_MINUTES").pipe(Config.withDefault(0)),
+  ]).pipe(
+    Effect.map(([app, idle, unused]) => app._tag === "Some" && (idle > 0 || unused > 0)),
+    Effect.orElseSucceed(() => false),
+  );
 
   const descriptor: ExecutionEnvironmentDescriptor = {
     environmentId,
@@ -257,6 +268,7 @@ export const make = Effect.gen(function* () {
         ? { serverSelfUpdateProgress: true }
         : {}),
       ...(desktopAppUpdate ? { desktopAppUpdate: true } : {}),
+      ...(sleepsOnFly ? { wakesOnRequest: true } : {}),
     },
   };
 

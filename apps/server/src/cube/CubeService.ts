@@ -20,8 +20,13 @@
  * repository yet. Creating claims it, wakes it, and starts its clone, which
  * takes seconds instead of a full boot. Changing the settings that shape a
  * cube replaces the spare, since its variables are fixed at creation.
+ *
+ * Whichever server manages cubes can hand that job to a cube home: a small
+ * Fly machine made from the same image that sleeps while no one uses it, so
+ * cubes can be made and managed with every computer of the user's off.
  */
 import {
+  EnvironmentHttpApi,
   CubeNotFoundError,
   CubeNotRunningError,
   CubeOperationError,
@@ -50,10 +55,12 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 import * as Ref from "effect/Ref";
+import * as Schedule from "effect/Schedule";
 import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 import { HttpClient } from "effect/unstable/http";
+import * as HttpApiClient from "effect/unstable/httpapi/HttpApiClient";
 
 import * as ServerConfig from "../config.ts";
 import * as ServerSettings from "../serverSettings.ts";
@@ -85,6 +92,10 @@ const decodeDescriptor = Schema.decodeUnknownEffect(EnvironmentDescriptor);
  * never have. Letting boot settle costs a minute of a small machine.
  */
 const SPARE_SETTLE = Duration.minutes(1);
+
+/** How long the cube home stays awake once no one is using it. */
+const HOME_UNUSED_MINUTES = 5;
+const HOME_LABEL = "Cube home";
 
 /** A spare is named before anyone knows what it will be for, so every cube is named by id. */
 const cubeLabel = (id: CubeId) => `Cube ${id.slice(0, 6)}`;
@@ -144,6 +155,17 @@ export class CubeService extends Context.Service<
     readonly keepSpareReady: Effect.Effect<void, CubeError>;
     /** What a Fly token (the given one, else the saved one) can reach. */
     readonly flyAccount: (input: CubeFlyAccountInput) => Effect.Effect<CubeFlyAccount, CubeError>;
+    /**
+     * Hands cube management to the cube home on Fly, making one if there is
+     * none, and returns a pairing for it. This server then stops managing
+     * cubes and forgets its Fly token, so only the home manages them.
+     */
+    readonly createHome: Effect.Effect<CubePairing, CubeError>;
+    /**
+     * Whether cube work is under way, and when it last was, so a cube home
+     * stays awake for work no client is waiting on, such as refilling the spare.
+     */
+    readonly work: Effect.Effect<{ readonly busy: boolean; readonly lastWorkAt: number }>;
   }
 >()("t3/cube/CubeService") {}
 
@@ -165,6 +187,20 @@ const make = Effect.gen(function* () {
   /** Held while making a spare, so two refills never make two. */
   const spareLock = yield* Semaphore.make(1);
   const scope = yield* Effect.scope;
+  const inFlight = yield* Ref.make(0);
+  const lastWorkAt = yield* Ref.make(0);
+
+  /** Counts `effect` as cube work while it runs; see `work`. */
+  const working = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+    Effect.acquireUseRelease(
+      Ref.update(inFlight, (count) => count + 1),
+      () => effect,
+      () =>
+        Clock.currentTimeMillis.pipe(
+          Effect.flatMap((now) => Ref.set(lastWorkAt, now)),
+          Effect.andThen(Ref.update(inFlight, (count) => count - 1)),
+        ),
+    );
 
   /** Deleted cubes' environments still within the retention window. */
   const readRemoved = Effect.gen(function* () {
@@ -416,7 +452,7 @@ const make = Effect.gen(function* () {
         yield* Effect.logInfo("A spare cube is ready", { id, backend });
       }),
     )
-    .pipe(Effect.withSpan("CubeService.keepSpareReady"));
+    .pipe(working, Effect.withSpan("CubeService.keepSpareReady"));
 
   /** Refills the spare after this request, without making the request wait for it. */
   const refillSpare = keepSpareReady.pipe(
@@ -529,6 +565,115 @@ const make = Effect.gen(function* () {
     },
   );
 
+  const createHome: CubeService["Service"]["createHome"] = Effect.gen(function* () {
+    const current = yield* ensureAvailable;
+    const fly = current.cubeFly;
+    if (current.cubeBackend !== "fly" || !fly.apiToken || !fly.organization) {
+      return yield* new CubeUnavailableError({
+        reason:
+          "A cube home runs on Fly. Connect a Fly account and choose Fly for new cubes first.",
+      });
+    }
+    const driver = drivers.fly;
+    // One left by an earlier attempt is used rather than making another.
+    const home =
+      (yield* driver.findHome) ??
+      (yield* Effect.gen(function* () {
+        const { id, environmentId } = yield* newIdentity;
+        return yield* driver.createHome({
+          id,
+          environmentId,
+          image: current.cubeImage,
+          environment: [
+            { name: "T3_HOST", value: "0.0.0.0", sensitive: false },
+            { name: "T3_CUBE_LABEL", value: HOME_LABEL, sensitive: false },
+            { name: "T3_ENVIRONMENT_ID", value: environmentId, sensitive: false },
+            {
+              name: "T3CODE_SLEEP_WHEN_UNUSED_MINUTES",
+              value: String(HOME_UNUSED_MINUTES),
+              sensitive: false,
+            },
+          ],
+        });
+      }));
+    const homeError = (cause: unknown) => new CubeOperationError({ operation: "home", cause });
+    yield* waitForHttpReady({
+      baseUrl: home.httpBaseUrl,
+      path: "/.well-known/t3/environment",
+      timeoutMs: READY_TIMEOUT_MS,
+      intervalMs: 500,
+      makeError: homeError,
+    }).pipe(Effect.provideService(HttpClient.HttpClient, httpClient));
+    const token = (yield* driver.execHome(home, [
+      "t3",
+      "auth",
+      "session",
+      "issue",
+      "--token-only",
+      "--ttl",
+      "10m",
+      "--label",
+      "cube home setup",
+    ])).trim();
+    // Minted while this server can still reach Fly; it gives up its token next.
+    const pairing = yield* driver
+      .execHome(home, [
+        "t3",
+        "auth",
+        "pairing",
+        "create",
+        "--json",
+        "--ttl",
+        PAIRING_TTL,
+        "--label",
+        "t3 cube home",
+      ])
+      .pipe(Effect.flatMap((stdout) => decodePairing(stdout).pipe(Effect.mapError(homeError))));
+
+    // Two servers managing cubes would fight over the spare, so this one
+    // stops first, and forgets the token so nothing here can touch Fly again.
+    yield* settings
+      .updateSettings({ enableCubes: false, cubeFly: { apiToken: "" } })
+      .pipe(Effect.mapError(homeError));
+    const homeApi = yield* HttpApiClient.make(EnvironmentHttpApi, {
+      baseUrl: home.httpBaseUrl,
+    }).pipe(Effect.provideService(HttpClient.HttpClient, httpClient));
+    yield* homeApi.settings
+      .update({
+        headers: { authorization: `Bearer ${token}` },
+        payload: {
+          enableCubes: true,
+          cubeBackend: "fly",
+          cubeFly: { apiToken: fly.apiToken, organization: fly.organization, region: fly.region },
+          cubeImage: current.cubeImage,
+          cubeSize: current.cubeSize,
+          // Read settings flag secret values as stored here, which the home
+          // would take as "keep yours"; it has none, so send them plain.
+          cubeEnvironment: current.cubeEnvironment.map(({ name, value, sensitive }) => ({
+            name,
+            value,
+            sensitive,
+          })),
+          cubeSleepAfterMinutes: current.cubeSleepAfterMinutes,
+          cubeDeleteAfterDays: current.cubeDeleteAfterDays,
+          cubeKeepReady: current.cubeKeepReady,
+        },
+      })
+      .pipe(
+        Effect.mapError((error) =>
+          homeError(`The cube home refused its settings (${error._tag}).`),
+        ),
+        // The home never took over, so this server carries on.
+        Effect.onError(() =>
+          settings
+            .updateSettings({ enableCubes: true, cubeFly: { apiToken: fly.apiToken } })
+            .pipe(Effect.ignore),
+        ),
+      );
+    yield* Effect.logInfo("Cube management moved to the cube home", { app: home.app });
+    return { httpBaseUrl: home.httpBaseUrl, ...pairing };
+  }).pipe(working, Effect.withSpan("CubeService.createHome"));
+
   const pruneStopped: CubeService["Service"]["pruneStopped"] = Effect.gen(function* () {
     const { cubeDeleteAfterDays } = yield* ensureAvailable;
     if (cubeDeleteAfterDays === 0) return [];
@@ -555,16 +700,21 @@ const make = Effect.gen(function* () {
       }
     }
     return removed;
-  }).pipe(Effect.withSpan("CubeService.pruneStopped"));
+  }).pipe(working, Effect.withSpan("CubeService.pruneStopped"));
 
   return CubeService.of({
     list,
-    create,
-    start,
-    stop,
-    remove,
-    pair,
+    create: (input) => working(create(input)),
+    start: (input) => working(start(input)),
+    stop: (input) => working(stop(input)),
+    remove: (input) => working(remove(input)),
+    pair: (input) => working(pair(input)),
     pruneStopped,
+    createHome,
+    work: Effect.all({
+      busy: Ref.get(inFlight).pipe(Effect.map((count) => count > 0)),
+      lastWorkAt: Ref.get(lastWorkAt),
+    }),
     removedEnvironments: ensureAvailable.pipe(
       Effect.andThen(readRemoved),
       Effect.map((records) => records.map((record) => record.environmentId)),
@@ -575,6 +725,22 @@ const make = Effect.gen(function* () {
 });
 
 export const layer = Layer.effect(CubeService, make);
+
+/**
+ * Runs `effect` now and then hourly by the wall clock, checked each minute, so
+ * a server that slept for hours (a cube home) catches up within a minute of
+ * waking, where an hour-long timer would wait out the hour again.
+ */
+const hourly = <E, R>(effect: Effect.Effect<void, E, R>) =>
+  Effect.gen(function* () {
+    const lastRanAt = yield* Ref.make(Number.NEGATIVE_INFINITY);
+    yield* Effect.gen(function* () {
+      const now = yield* Clock.currentTimeMillis;
+      if (now - (yield* Ref.get(lastRanAt)) < Duration.toMillis(Duration.hours(1))) return;
+      yield* Ref.set(lastRanAt, now);
+      yield* effect;
+    }).pipe(Effect.repeat(Schedule.spaced(Duration.minutes(1))));
+  });
 
 /**
  * Keeps the spare in step with the settings: made on start, replaced when a
@@ -597,29 +763,28 @@ export const sparesLayer = Layer.effectDiscard(
     }).pipe(
       Effect.catchCause((cause) => Effect.logWarning("Could not make a spare cube", { cause })),
     );
-    yield* Stream.merge(
-      settings.streamChanges.pipe(Stream.debounce("2 seconds")),
-      Stream.tick(Duration.hours(1)),
-    ).pipe(
+    yield* settings.streamChanges.pipe(
+      Stream.debounce("2 seconds"),
       Stream.runForEach(() => refill),
       Effect.forkScoped,
     );
+    yield* hourly(refill).pipe(Effect.forkScoped);
   }),
 );
 
 /**
- * Prunes long-stopped cubes an hour after start and hourly after that.
- * Quietly does nothing on servers with cubes turned off.
+ * Prunes long-stopped cubes on start and hourly after that. Quietly does
+ * nothing on servers with cubes turned off.
  */
 export const pruneLayer = Layer.effectDiscard(
   Effect.gen(function* () {
     const cubes = yield* CubeService;
-    yield* cubes.pruneStopped.pipe(
-      Effect.catchTag("CubeUnavailableError", () => Effect.succeed([])),
-      Effect.catchCause((cause) => Effect.logWarning("Cube pruning failed", { cause })),
-      Effect.delay(Duration.hours(1)),
-      Effect.forever,
-      Effect.forkScoped,
-    );
+    yield* hourly(
+      cubes.pruneStopped.pipe(
+        Effect.catchTag("CubeUnavailableError", () => Effect.succeed([])),
+        Effect.catchCause((cause) => Effect.logWarning("Cube pruning failed", { cause })),
+        Effect.asVoid,
+      ),
+    ).pipe(Effect.forkScoped);
   }),
 );

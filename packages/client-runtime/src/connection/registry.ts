@@ -129,7 +129,8 @@ export class EnvironmentRegistry extends Context.Service<
     >;
     /**
      * Sets when a saved environment connects (see `ConnectWhen`) and persists
-     * it. Restarts its connection under the new policy.
+     * it. Restarts its connection under the new policy, staying connected if
+     * it was.
      */
     readonly setConnectWhen: (
       environmentId: EnvironmentId,
@@ -892,10 +893,20 @@ export const make = Effect.gen(function* () {
         if (!(yield* Ref.get(platformEnvironmentIds)).has(environmentId)) {
           yield* registrations.setConnectWhen(environmentId, connectWhen);
         }
+        const previous = (yield* SubscriptionRef.get(serviceScopes)).get(environmentId);
+        const wanted =
+          previous !== undefined && (yield* SubscriptionRef.get(previous.supervisor.state)).desired;
         const { connectWhen: _previous, ...rest } = entry;
         // The supervisor's policy is fixed when it is made, so start a new one.
         yield* installEntryLocked(connectWhen === "needed" ? { ...rest, connectWhen } : rest);
+        // A connection in use when the policy changed is still needed.
+        const next = (yield* SubscriptionRef.get(serviceScopes)).get(environmentId);
+        if (wanted && next !== undefined) yield* next.supervisor.connect;
       }),
+    ).pipe(
+      // Callers often run in a stream of this environment, which replacing its
+      // supervisor interrupts; the switch must finish regardless.
+      Effect.uninterruptible,
     );
   });
 

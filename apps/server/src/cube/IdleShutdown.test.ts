@@ -17,14 +17,17 @@ import * as Layer from "effect/Layer";
 import * as Ref from "effect/Ref";
 import { TestClock } from "effect/testing";
 
+import * as BackgroundPolicy from "../background/BackgroundPolicy.ts";
 import * as ServerConfig from "../config.ts";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
+import * as CubeService from "./CubeService.ts";
 import * as IdleShutdown from "./IdleShutdown.ts";
 
 /**
  * Runs the idle check against a thread list the test controls: whether a run
  * is in progress, and when the latest run finished. Setting `frozen` holds the
- * next check mid-way, as a suspended machine would.
+ * next check mid-way, as a suspended machine would. For a cube home, the
+ * clients showing the app and the cube work under way are controlled too.
  */
 const harness = (env: Record<string, string>) =>
   Effect.gen(function* () {
@@ -32,6 +35,8 @@ const harness = (env: Record<string, string>) =>
     const running = yield* Ref.make(false);
     const completedAt = yield* Ref.make<number | null>(null);
     const frozen = yield* Ref.make<Deferred.Deferred<void> | null>(null);
+    const foregroundClients = yield* Ref.make(0);
+    const cubeWork = yield* Ref.make({ busy: false, lastWorkAt: 0 });
     // The clone's process id file, kept in memory: real file reads would race
     // the test clock.
     const pidFileContent = yield* Ref.make<string | null>(null);
@@ -68,9 +73,19 @@ const harness = (env: Record<string, string>) =>
           })),
         ),
     } as unknown as ThreadManagementService.ThreadManagementService["Service"]);
+    const policy = Layer.succeed(BackgroundPolicy.BackgroundPolicy, {
+      snapshot: Ref.get(foregroundClients).pipe(
+        Effect.map((activeForegroundLeaseCount) => ({ activeForegroundLeaseCount })),
+      ),
+    } as unknown as BackgroundPolicy.BackgroundPolicy["Service"]);
+    const cubes = Layer.succeed(CubeService.CubeService, {
+      work: Ref.get(cubeWork),
+    } as unknown as CubeService.CubeService["Service"]);
     const context = yield* Layer.build(
       Layer.mergeAll(
         threads,
+        policy,
+        cubes,
         ServerConfig.layerTest(process.cwd(), { prefix: "t3code-idle-test-" }),
       ).pipe(
         Layer.provideMerge(ConfigProvider.layer(ConfigProvider.fromEnv({ env }))),
@@ -80,10 +95,20 @@ const harness = (env: Record<string, string>) =>
     const idle = yield* IdleShutdown.make({
       sleep: Ref.update(slept, (count) => count + 1),
     }).pipe(Effect.provide(fileSystem), Effect.provide(context));
-    return { slept, running, completedAt, frozen, idle, pidFileContent };
+    return {
+      slept,
+      running,
+      completedAt,
+      frozen,
+      idle,
+      pidFileContent,
+      foregroundClients,
+      cubeWork,
+    };
   });
 
 const TWENTY = { T3CODE_SLEEP_WHEN_IDLE_MINUTES: "20" };
+const HOME = { T3CODE_SLEEP_WHEN_UNUSED_MINUTES: "5" };
 
 describe("IdleShutdown", () => {
   it.effect("sleeps once there has been no agent work for the configured time", () =>
@@ -169,6 +194,38 @@ describe("IdleShutdown", () => {
       yield* idle.sleepNow;
       yield* TestClock.adjust("2 seconds");
       expect(yield* Ref.get(slept)).toBe(1);
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("keeps a home awake while a client shows the app, then sleeps once unused", () =>
+    Effect.gen(function* () {
+      const { slept, foregroundClients, running } = yield* harness(HOME);
+      yield* Ref.set(foregroundClients, 1);
+      yield* TestClock.adjust("2 hours");
+      expect(yield* Ref.get(slept)).toBe(0);
+      yield* Ref.set(foregroundClients, 0);
+      // A home runs no agents, so a thread's run means nothing to it.
+      yield* Ref.set(running, true);
+      yield* TestClock.adjust("4 minutes");
+      expect(yield* Ref.get(slept)).toBe(0);
+      yield* TestClock.adjust("2 minutes");
+      expect(yield* Ref.get(slept)).toBeGreaterThan(0);
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("keeps a home awake for cube work no client waits on", () =>
+    Effect.gen(function* () {
+      const { slept, cubeWork, idle } = yield* harness(HOME);
+      yield* Ref.set(cubeWork, { busy: true, lastWorkAt: 0 });
+      yield* TestClock.adjust("1 hour");
+      expect(yield* Ref.get(slept)).toBe(0);
+      yield* Ref.set(cubeWork, { busy: false, lastWorkAt: yield* Clock.currentTimeMillis });
+      yield* TestClock.adjust("4 minutes");
+      expect(yield* Ref.get(slept)).toBe(0);
+      yield* TestClock.adjust("2 minutes");
+      expect(yield* Ref.get(slept)).toBeGreaterThan(0);
+      // Only cubes sleep on request; asking a home means someone is using it.
+      expect((yield* idle.sleepNow.pipe(Effect.flip))._tag).toBe("CubeUnavailableError");
     }).pipe(Effect.scoped),
   );
 

@@ -341,4 +341,33 @@ describe("FlyCubeDriver", () => {
     expect(FlyCubeDriver.flyAuthorization("fm2_abc")).toBe("FlyV1 fm2_abc");
     expect(FlyCubeDriver.flyAuthorization("plain-token")).toBe("Bearer plain-token");
   });
+
+  it.effect("makes a small cube home that is never listed as a cube", () => {
+    const fly = fakeFly();
+    return run(fly, (driver) =>
+      Effect.gen(function* () {
+        expect(yield* driver.findHome).toBeNull();
+        const home = yield* driver.createHome({
+          id: "home12345678",
+          environmentId: spec.environmentId,
+          image: spec.image,
+          environment: [{ name: "T3CODE_SLEEP_WHEN_UNUSED_MINUTES", value: "5", sensitive: false }],
+        });
+        expect(home).toEqual({
+          app: "t3-home-home12345678",
+          httpBaseUrl: "https://t3-home-home12345678.fly.dev",
+        });
+        const create = fly.calls.find((call) => call.path.endsWith("/machines") && call.body)!;
+        expect(create.body).toMatchObject({
+          config: {
+            guest: { cpu_kind: "shared", cpus: 1, memory_mb: 1024 },
+            env: { T3CODE_SLEEP_WHEN_UNUSED_MINUTES: "5" },
+            services: [expect.objectContaining({ autostart: true })],
+          },
+        });
+        expect(yield* driver.list).toEqual([]);
+        expect(yield* driver.findHome).toEqual(home);
+      }),
+    );
+  });
 });

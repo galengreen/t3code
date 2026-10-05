@@ -20,6 +20,7 @@ import type {
   CubeState,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
+import type { FlyCubeDriver } from "./FlyCubeDriver.ts";
 import type * as Effect from "effect/Effect";
 
 export type CubeOperation = CubeOperationError["operation"];
@@ -101,5 +102,6 @@ export interface CubeDriver {
 
 export class CubeDrivers extends Context.Service<
   CubeDrivers,
-  Readonly<Record<CubeBackend, CubeDriver>>
+  // Fly's driver also makes the cube home.
+  Readonly<Record<CubeBackend, CubeDriver> & { readonly fly: FlyCubeDriver }>
 >()("t3/cube/CubeDriver/CubeDrivers") {}

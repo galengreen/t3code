@@ -708,6 +708,15 @@ export const SETTINGS_SEARCH_ITEMS = [
     scope: "environment-defaults",
   },
   {
+    id: "cube-home",
+    title: "Cube home",
+    to: "/settings/cubes",
+    targetId: "cubes",
+    searchTerms: ["cube home fly manage cubes without this computer sleep move"],
+    environmentOnly: true,
+    scope: "environment-defaults",
+  },
+  {
     id: "cube-keep-ready",
     title: "Keep a cube ready",
     to: "/settings/cubes",

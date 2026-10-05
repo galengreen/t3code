@@ -39,6 +39,7 @@ const runWithCubes = <A, E>(
     readonly stop: (input: CubeIdInput) => Effect.Effect<CubeSummary, Error>;
     readonly remove: (input: CubeIdInput) => Effect.Effect<void, Error>;
     readonly pair: (input: CubeIdInput) => Effect.Effect<CubePairing, Error>;
+    readonly createHome: Effect.Effect<CubePairing, Error>;
   }) => Effect.Effect<A, E>,
 ) =>
   Effect.gen(function* () {
@@ -64,6 +65,7 @@ const runWithCubes = <A, E>(
               stop: (payload) => client.stop({ headers, payload }),
               remove: (payload) => client.remove({ headers, payload }),
               pair: (payload) => client.pair({ headers, payload }),
+              createHome: client.createHome({ headers }),
             });
           }),
         (issued) => environmentAuth.revokeSession(issued.sessionId).pipe(Effect.ignore),
@@ -141,20 +143,24 @@ const cubeRemoveCommand = Command.make("rm", { ...projectLocationFlags, id: idAr
   ),
 );
 
+const printPairing = (pairing: CubePairing) =>
+  Console.log(
+    `${pairing.httpBaseUrl}/pair#token=${pairing.credential}\nExpires: ${pairing.expiresAt}`,
+  );
+
 const cubePairCommand = Command.make("pair", { ...projectLocationFlags, id: idArgument }).pipe(
   Command.withDescription("Print a one-time pairing URL for a running cube."),
   Command.withHandler((flags) =>
-    runWithCubes(flags, (cubes) =>
-      cubes
-        .pair({ id: flags.id })
-        .pipe(
-          Effect.flatMap((pairing) =>
-            Console.log(
-              `${pairing.httpBaseUrl}/pair#token=${pairing.credential}\nExpires: ${pairing.expiresAt}`,
-            ),
-          ),
-        ),
-    ),
+    runWithCubes(flags, (cubes) => cubes.pair({ id: flags.id }).pipe(Effect.flatMap(printPairing))),
+  ),
+);
+
+const cubeHomeCommand = Command.make("home", { ...projectLocationFlags }).pipe(
+  Command.withDescription(
+    "Move cube management to a cube home on Fly, which sleeps when unused, and print a one-time pairing URL for it.",
+  ),
+  Command.withHandler((flags) =>
+    runWithCubes(flags, (cubes) => cubes.createHome.pipe(Effect.flatMap(printPairing))),
   ),
 );
 
@@ -169,5 +175,6 @@ export const cubeCommand = Command.make("cube").pipe(
     cubeStopCommand,
     cubeRemoveCommand,
     cubePairCommand,
+    cubeHomeCommand,
   ]),
 );

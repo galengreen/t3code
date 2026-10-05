@@ -42,6 +42,7 @@ import {
   OrchestrationV2ThreadHistoryPage,
 } from "./orchestrationV2.ts";
 import { Project, ProjectMutation, ProjectSnapshot } from "./project.ts";
+import { ServerSettingsPatch } from "./settings.ts";
 import {
   CubeCreateInput,
   CubeIdInput,
@@ -119,6 +120,7 @@ export const EnvironmentInternalErrorReason = Schema.Literals([
   "orchestration_thread_snapshot_failed",
   "orchestration_thread_bounded_snapshot_failed",
   "orchestration_thread_history_failed",
+  "settings_update_failed",
   "internal_error",
 ]);
 export type EnvironmentInternalErrorReason = typeof EnvironmentInternalErrorReason.Type;
@@ -643,7 +645,27 @@ class EnvironmentCubesHttpApi extends HttpApiGroup.make("cubes")
       success: CubePairing,
       error: EnvironmentCubeErrors,
     }).middleware(EnvironmentAuthenticatedAuth),
+  )
+  .add(
+    HttpApiEndpoint.post("createHome", "/api/cubes/home", {
+      headers: OptionalBearerHeaders,
+      success: CubePairing,
+      error: EnvironmentCubeErrors,
+    }).middleware(EnvironmentAuthenticatedAuth),
   ) {}
+
+/**
+ * Changes this server's settings, for another server handing it work, such as
+ * moving cube management to a cube home. Answers without the settings, so
+ * secrets never travel back.
+ */
+class EnvironmentSettingsHttpApi extends HttpApiGroup.make("settings").add(
+  HttpApiEndpoint.post("update", "/api/settings", {
+    headers: OptionalBearerHeaders,
+    payload: ServerSettingsPatch,
+    error: [EnvironmentScopeRequiredError, EnvironmentInternalError],
+  }).middleware(EnvironmentAuthenticatedAuth),
+) {}
 
 /** Large, compressible pull-request payloads travel over HTTP rather than the RPC socket. */
 class EnvironmentPullRequestsHttpApi extends HttpApiGroup.make("pullRequests").add(
@@ -729,4 +751,5 @@ export class EnvironmentHttpApi extends HttpApi.make("environment")
   .add(EnvironmentPullRequestsHttpApi)
   .add(EnvironmentProjectsHttpApi)
   .add(EnvironmentCubesHttpApi)
+  .add(EnvironmentSettingsHttpApi)
   .add(EnvironmentConnectHttpApi) {}

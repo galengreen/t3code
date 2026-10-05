@@ -449,6 +449,7 @@ export const WS_METHODS = {
   cubeFlyAccount: "cube.flyAccount",
   cubeRemovedEnvironments: "cube.removedEnvironments",
   cubeSleep: "cube.sleep",
+  cubeCreateHome: "cube.createHome",
 
   // Server meta
   serverProbe: "server.probe",
@@ -1504,6 +1505,15 @@ const WsCubeSleepRpc = Rpc.make(WS_METHODS.cubeSleep, {
   error: Schema.Union([CubeError, EnvironmentAuthorizationError]),
 });
 
+// Moves cube management from this server to a cube home on Fly, creating it
+// if there is none, and answers with a pairing for it. This server then stops
+// managing cubes and forgets its Fly token, so the home is the only one that does.
+const WsCubeCreateHomeRpc = Rpc.make(WS_METHODS.cubeCreateHome, {
+  payload: Schema.Struct({}),
+  success: CubePairing,
+  error: Schema.Union([CubeError, EnvironmentAuthorizationError]),
+});
+
 const WsCubeRemovedEnvironmentsRpc = Rpc.make(WS_METHODS.cubeRemovedEnvironments, {
   payload: Schema.Struct({}),
   success: Schema.Array(EnvironmentId),
@@ -1939,6 +1949,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsCubeFlyAccountRpc,
   WsCubeRemovedEnvironmentsRpc,
   WsCubeSleepRpc,
+  WsCubeCreateHomeRpc,
   WsCubePairRpc,
   WsSubscribeServerConfigRpc,
   WsSubscribeServerLifecycleRpc,
