@@ -18,7 +18,12 @@ import { Input } from "../ui/input";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Switch } from "../ui/switch";
 import { EnvironmentVariablesEditor } from "./EnvironmentVariablesEditor";
-import { SettingsRow, SettingsSearchTarget, SettingsSection } from "./settingsLayout";
+import {
+  SettingsPageContainer,
+  SettingsRow,
+  SettingsSearchTarget,
+  SettingsSection,
+} from "./settingsLayout";
 import { searchableSetting } from "./settingsSearch";
 import { useSettingsScope } from "./SettingsScopeContext";
 
@@ -27,7 +32,16 @@ import { useSettingsScope } from "./SettingsScopeContext";
  * creates them and their variables usually hold login tokens, so these
  * settings save to the selected environment only instead of fanning out.
  */
-export function SandboxSettings() {
+/** Settings → Cubes. */
+export function CubesSettingsPanel() {
+  return (
+    <SettingsPageContainer>
+      <SandboxSettings />
+    </SettingsPageContainer>
+  );
+}
+
+function SandboxSettings() {
   const { scope, environment, connectedEnvironments } = useSettingsScope();
   if (scope.kind === "project" || scope.kind === "checkout") return null;
   const environmentId =

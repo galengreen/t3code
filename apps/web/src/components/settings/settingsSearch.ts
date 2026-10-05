@@ -19,6 +19,7 @@ export type SettingsPath =
   | "/settings/snap-shot"
   | "/settings/providers"
   | "/settings/integrations"
+  | "/settings/cubes"
   | "/settings/scheduled-tasks"
   | "/settings/source-control"
   | "/settings/storage"
@@ -91,6 +92,7 @@ export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsPath, string>> = {
   "/settings/snap-shot": "SnapShots",
   "/settings/providers": "Providers",
   "/settings/integrations": "Integrations",
+  "/settings/cubes": "Cubes",
   "/settings/scheduled-tasks": "Scheduled Tasks",
   "/settings/source-control": "Source Control",
   "/settings/storage": "Storage",
@@ -637,7 +639,7 @@ export const SETTINGS_SEARCH_ITEMS = [
   {
     id: "sandboxes",
     title: "Cubes",
-    to: "/settings/integrations",
+    to: "/settings/cubes",
     searchTerms: ["sandbox vm docker container isolated environment task host"],
     environmentOnly: true,
     scope: "environment-defaults",
@@ -645,7 +647,7 @@ export const SETTINGS_SEARCH_ITEMS = [
   {
     id: "sandboxes-enabled",
     title: "Host cubes",
-    to: "/settings/integrations",
+    to: "/settings/cubes",
     targetId: "sandboxes",
     searchTerms: ["sandbox vm docker container isolated environment task enable"],
     environmentOnly: true,
@@ -654,7 +656,7 @@ export const SETTINGS_SEARCH_ITEMS = [
   {
     id: "sandbox-backend",
     title: "Cubes run on",
-    to: "/settings/integrations",
+    to: "/settings/cubes",
     targetId: "sandboxes",
     searchTerms: ["docker fly cloud vm machines backend where"],
     environmentOnly: true,
@@ -663,7 +665,7 @@ export const SETTINGS_SEARCH_ITEMS = [
   {
     id: "sandbox-size",
     title: "Cube size",
-    to: "/settings/integrations",
+    to: "/settings/cubes",
     targetId: "sandboxes",
     searchTerms: ["cpu memory ram small medium large resources"],
     environmentOnly: true,
@@ -672,7 +674,7 @@ export const SETTINGS_SEARCH_ITEMS = [
   {
     id: "sandbox-fly-token",
     title: "Fly API token",
-    to: "/settings/integrations",
+    to: "/settings/cubes",
     targetId: "sandboxes",
     searchTerms: ["fly.io cloud vm machines connect account token"],
     environmentOnly: true,
@@ -681,7 +683,7 @@ export const SETTINGS_SEARCH_ITEMS = [
   {
     id: "sandbox-fly-organization",
     title: "Fly organization",
-    to: "/settings/integrations",
+    to: "/settings/cubes",
     targetId: "sandboxes",
     searchTerms: ["fly.io org billing"],
     environmentOnly: true,
@@ -690,7 +692,7 @@ export const SETTINGS_SEARCH_ITEMS = [
   {
     id: "sandbox-fly-region",
     title: "Fly region",
-    to: "/settings/integrations",
+    to: "/settings/cubes",
     targetId: "sandboxes",
     searchTerms: ["fly.io location datacenter nearest"],
     environmentOnly: true,
@@ -699,7 +701,7 @@ export const SETTINGS_SEARCH_ITEMS = [
   {
     id: "sandbox-sleep",
     title: "Sleep when idle",
-    to: "/settings/integrations",
+    to: "/settings/cubes",
     targetId: "sandboxes",
     searchTerms: ["sandbox idle stop pause cost billing auto sleep minutes"],
     environmentOnly: true,
@@ -708,7 +710,7 @@ export const SETTINGS_SEARCH_ITEMS = [
   {
     id: "sandbox-keep-ready",
     title: "Keep a cube ready",
-    to: "/settings/integrations",
+    to: "/settings/cubes",
     targetId: "sandboxes",
     searchTerms: ["sandbox spare warm pool fast start prewarm ready"],
     environmentOnly: true,
@@ -717,7 +719,7 @@ export const SETTINGS_SEARCH_ITEMS = [
   {
     id: "sandbox-delete",
     title: "Delete stopped cubes",
-    to: "/settings/integrations",
+    to: "/settings/cubes",
     targetId: "sandboxes",
     searchTerms: ["sandbox remove cleanup retention days old stopped"],
     environmentOnly: true,
@@ -726,7 +728,7 @@ export const SETTINGS_SEARCH_ITEMS = [
   {
     id: "sandbox-image",
     title: "Cube image",
-    to: "/settings/integrations",
+    to: "/settings/cubes",
     targetId: "sandboxes",
     searchTerms: ["docker container"],
     environmentOnly: true,
@@ -735,7 +737,7 @@ export const SETTINGS_SEARCH_ITEMS = [
   {
     id: "sandbox-address",
     title: "Cube address",
-    to: "/settings/integrations",
+    to: "/settings/cubes",
     targetId: "sandboxes",
     searchTerms: ["publish host tailscale lan loopback port"],
     environmentOnly: true,
@@ -744,7 +746,7 @@ export const SETTINGS_SEARCH_ITEMS = [
   {
     id: "sandbox-variables",
     title: "Cube variables",
-    to: "/settings/integrations",
+    to: "/settings/cubes",
     targetId: "sandboxes",
     searchTerms: [
       "environment token secret claude setup-token CLAUDE_CODE_OAUTH_TOKEN api key credentials login",
@@ -1006,6 +1008,7 @@ const SETTINGS_CATEGORY_SCOPES: Readonly<Record<SettingsPath, SettingsSearchScop
   "/settings/keybindings": null,
   "/settings/providers": null,
   "/settings/integrations": null,
+  "/settings/cubes": null,
   "/settings/source-control": "environment-defaults",
   "/settings/storage": "project-defaults",
   "/settings/connections": "connections",
