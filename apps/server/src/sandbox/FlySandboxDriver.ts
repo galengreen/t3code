@@ -429,7 +429,7 @@ export const make = Effect.gen(function* () {
           () =>
             Effect.fail(
               new SandboxUnavailableError({
-                reason: `Fly could not find the image ${spec.image}. Fly pulls images from a registry, so set the sandbox image to a registry reference such as registry.fly.io/<app>:latest.`,
+                reason: `Fly could not find the image ${spec.image}. Fly pulls images from a registry, so set the cube image to a registry reference such as registry.fly.io/<app>:latest.`,
               }),
             ),
         ),

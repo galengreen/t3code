@@ -67,6 +67,10 @@ starts, stops, removes, and mints pairing credentials; it never runs work inside
 one. Docker is the record: containers carry `t3code.sandbox.*` labels and are
 read back with `docker inspect`, so there is no sandbox table to drift.
 
+The product calls them cubes (UI copy, errors, `t3 cube`). Code, contracts, RPC
+methods, settings keys, and container labels keep `sandbox`, so renaming the
+product term never touches the wire or stored state.
+
 Clients connect to a sandbox directly, at `sandboxPublishHost` (loopback by
 default, so only clients on the host machine). Docker assigns a new port each
 time a sandbox starts, so a client cannot keep a sandbox's address. Instead each

@@ -15,9 +15,9 @@ import { useAtomCommand } from "../state/use-atom-command";
 export type SandboxMenuAction = "sandbox:start" | "sandbox:stop" | "sandbox:delete";
 
 const FAILURE_TITLES: Record<SandboxMenuAction, string> = {
-  "sandbox:start": "Could not start sandbox",
-  "sandbox:stop": "Could not put sandbox to sleep",
-  "sandbox:delete": "Could not delete sandbox",
+  "sandbox:start": "Could not start cube",
+  "sandbox:stop": "Could not put cube to sleep",
+  "sandbox:delete": "Could not delete cube",
 };
 
 /** Whether a thread menu should offer sandbox actions, read when the menu opens. */
@@ -46,7 +46,7 @@ export function useSandboxActions() {
         const confirmed = await settlePromise(() =>
           api.dialogs.confirm(
             [
-              `Delete sandbox "${hosted.sandbox.label}"?`,
+              `Delete cube "${hosted.sandbox.label}"?`,
               "Its threads and files go with it, including changes that were not pushed.",
             ].join("\n"),
             { variant: "destructive" },

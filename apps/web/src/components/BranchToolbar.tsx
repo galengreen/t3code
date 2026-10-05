@@ -283,7 +283,7 @@ const MobileRunContextSelector = memo(function MobileRunContextSelector({
                   <MenuRadioItem value="sandbox" disabled={envLocked} closeOnClick>
                     <span className="flex min-w-0 items-center gap-1.5">
                       <BoxIcon className="size-3" aria-hidden="true" />
-                      <span className="min-w-0 truncate">{sandboxLabel ?? "New sandbox"}</span>
+                      <span className="min-w-0 truncate">{sandboxLabel ?? "New cube"}</span>
                     </span>
                   </MenuRadioItem>
                 ) : sandboxUnavailableReason ? (
@@ -291,7 +291,7 @@ const MobileRunContextSelector = memo(function MobileRunContextSelector({
                     <span className="flex min-w-0 flex-col">
                       <span className="flex min-w-0 items-center gap-1.5">
                         <BoxIcon className="size-3" aria-hidden="true" />
-                        <span className="min-w-0 truncate">New sandbox</span>
+                        <span className="min-w-0 truncate">New cube</span>
                       </span>
                       <span className="text-muted-foreground text-xs">
                         {sandboxUnavailableReason}

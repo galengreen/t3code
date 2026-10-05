@@ -91,7 +91,7 @@ const failureMessage = (result: Parameters<typeof squashAtomCommandFailure>[0]) 
   const failure = squashAtomCommandFailure(result);
   return failure instanceof Error && failure.message.trim().length > 0
     ? failure.message
-    : "The sandbox could not be created.";
+    : "The cube could not be created.";
 };
 
 /**
@@ -123,7 +123,7 @@ export function useSandboxDraftLaunch() {
       input: { repositoryUrl: input.repositoryUrl },
     });
     if (created._tag === "Failure") {
-      if (isAtomCommandInterrupted(created)) return fail("Starting the sandbox was interrupted.");
+      if (isAtomCommandInterrupted(created)) return fail("Starting the cube was interrupted.");
       return fail(failureMessage(created));
     }
 
@@ -151,7 +151,7 @@ export function useSandboxDraftLaunch() {
     });
     const project = appAtomRegistry.get(environmentProjects.projectsAtom).find(matches);
     if (!found || !project) {
-      return fail("The sandbox is running, but the repository did not finish cloning in it.");
+      return fail("The cube is running, but the repository did not finish cloning in it.");
     }
     setState((current) => advanceSandboxLaunch(current, "send", Date.now()));
     return { environmentId, projectId: project.id };

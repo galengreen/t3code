@@ -36,11 +36,11 @@ export function SandboxSettings() {
   return (
     <SettingsSection
       id={searchableSetting("sandboxes").id}
-      title={aggregate && environment ? `Sandboxes · ${environment.label}` : "Sandboxes"}
+      title={aggregate && environment ? `Cubes · ${environment.label}` : "Cubes"}
     >
       {environmentId === null ? (
         <p className="px-4 py-3 text-sm text-muted-foreground">
-          Connect an environment to host sandboxes on it.
+          Connect an environment to host cubes on it.
         </p>
       ) : (
         // Drafts belong to one environment; switching must not carry them over.
@@ -94,12 +94,12 @@ function SandboxControls({ environmentId }: { readonly environmentId: Environmen
     <>
       <SettingsRow
         {...searchableSetting("sandboxes-enabled")}
-        description="Create sandboxes, each a separate environment for one task, with this machine's Docker or on Fly.io."
+        description="Create cubes, each a separate environment for one task, with this machine's Docker or on Fly.io."
         control={
           <Switch
             checked={settings.enableSandboxes}
             onCheckedChange={(checked) => void save({ enableSandboxes: Boolean(checked) })}
-            aria-label="Host sandboxes"
+            aria-label="Host cubes"
           />
         }
       />
@@ -109,8 +109,8 @@ function SandboxControls({ environmentId }: { readonly environmentId: Environmen
             {...searchableSetting("sandbox-backend")}
             description={
               fly
-                ? "New sandboxes run as Fly Machines on your own Fly account. Existing sandboxes stay where they are."
-                : "New sandboxes run in Docker here. Docker access amounts to root on this machine."
+                ? "New cubes run as Fly Machines on your own Fly account. Existing cubes stay where they are."
+                : "New cubes run in Docker here. Docker access amounts to root on this machine."
             }
             control={
               <Select
@@ -119,7 +119,7 @@ function SandboxControls({ environmentId }: { readonly environmentId: Environmen
                   if (value === "docker" || value === "fly") void save({ sandboxBackend: value });
                 }}
               >
-                <SelectTrigger size="sm" className="w-full sm:w-56" aria-label="Sandboxes run on">
+                <SelectTrigger size="sm" className="w-full sm:w-56" aria-label="Cubes run on">
                   <SelectValue>{BACKEND_LABELS[settings.sandboxBackend]}</SelectValue>
                 </SelectTrigger>
                 <SelectPopup align="end" alignItemWithTrigger={false}>
@@ -135,7 +135,7 @@ function SandboxControls({ environmentId }: { readonly environmentId: Environmen
           {fly ? <FlySettings environmentId={environmentId} save={save} /> : null}
           <SettingsRow
             {...searchableSetting("sandbox-size")}
-            description="How much machine each new sandbox gets. Builds and large test suites want medium or more."
+            description="How much machine each new cube gets. Builds and large test suites want medium or more."
             control={
               <Select
                 value={settings.sandboxSize}
@@ -145,7 +145,7 @@ function SandboxControls({ environmentId }: { readonly environmentId: Environmen
                   }
                 }}
               >
-                <SelectTrigger size="sm" className="w-full sm:w-56" aria-label="Sandbox size">
+                <SelectTrigger size="sm" className="w-full sm:w-56" aria-label="Cube size">
                   <SelectValue>{SIZE_LABELS[settings.sandboxSize]}</SelectValue>
                 </SelectTrigger>
                 <SelectPopup align="end" alignItemWithTrigger={false}>
@@ -160,7 +160,7 @@ function SandboxControls({ environmentId }: { readonly environmentId: Environmen
           />
           <SettingsRow
             {...searchableSetting("sandbox-sleep")}
-            description="Put a sandbox to sleep once its agent has finished and no message has been sent for this long, so it stops costing money. Opening its thread wakes it. Applies to sandboxes created afterwards."
+            description="Put a cube to sleep once its agent has finished and no message has been sent for this long, so it stops costing money. Opening its thread wakes it. Applies to cubes created afterwards."
             control={
               <Select
                 value={String(settings.sandboxSleepAfterMinutes)}
@@ -186,20 +186,20 @@ function SandboxControls({ environmentId }: { readonly environmentId: Environmen
             {...searchableSetting("sandbox-keep-ready")}
             description={
               fly
-                ? "Keep one sandbox booted and asleep, so a new one starts in seconds. A sleeping sandbox only costs its storage, a few cents a month."
-                : "Keep one sandbox booted and paused, so a new one starts in seconds. A paused sandbox holds its memory on this machine."
+                ? "Keep one cube booted and asleep, so a new one starts in seconds. A sleeping cube only costs its storage, a few cents a month."
+                : "Keep one cube booted and paused, so a new one starts in seconds. A paused cube holds its memory on this machine."
             }
             control={
               <Switch
                 checked={settings.sandboxKeepReady}
                 onCheckedChange={(checked) => void save({ sandboxKeepReady: Boolean(checked) })}
-                aria-label="Keep a sandbox ready"
+                aria-label="Keep a cube ready"
               />
             }
           />
           <SettingsRow
             {...searchableSetting("sandbox-delete")}
-            description="Delete a sandbox that has stayed stopped this long. Its files go with it, including changes that were not pushed."
+            description="Delete a cube that has stayed stopped this long. Its files go with it, including changes that were not pushed."
             control={
               <Select
                 value={String(settings.sandboxDeleteAfterDays)}
@@ -211,7 +211,7 @@ function SandboxControls({ environmentId }: { readonly environmentId: Environmen
                 <SelectTrigger
                   size="sm"
                   className="w-full sm:w-56"
-                  aria-label="Delete stopped sandboxes"
+                  aria-label="Delete stopped cubes"
                 >
                   <SelectValue>{deleteLabel(settings.sandboxDeleteAfterDays)}</SelectValue>
                 </SelectTrigger>
@@ -229,8 +229,8 @@ function SandboxControls({ environmentId }: { readonly environmentId: Environmen
             {...searchableSetting("sandbox-image")}
             description={
               fly
-                ? "Image each new sandbox runs. Fly pulls it, so use a registry reference."
-                : "Docker image each new sandbox runs."
+                ? "Image each new cube runs. Fly pulls it, so use a registry reference."
+                : "Docker image each new cube runs."
             }
             control={
               <DraftInput
@@ -243,14 +243,14 @@ function SandboxControls({ environmentId }: { readonly environmentId: Environmen
                   if (image && image !== settings.sandboxImage) void save({ sandboxImage: image });
                 }}
                 spellCheck={false}
-                aria-label="Sandbox image"
+                aria-label="Cube image"
               />
             }
           />
           {fly ? null : (
             <SettingsRow
               {...searchableSetting("sandbox-address")}
-              description="Where sandboxes accept connections. Loopback serves this machine only; use its LAN or Tailscale address to reach sandboxes from other devices."
+              description="Where cubes accept connections. Loopback serves this machine only; use its LAN or Tailscale address to reach cubes from other devices."
               control={
                 <DraftInput
                   size="sm"
@@ -264,14 +264,14 @@ function SandboxControls({ environmentId }: { readonly environmentId: Environmen
                     }
                   }}
                   spellCheck={false}
-                  aria-label="Sandbox address"
+                  aria-label="Cube address"
                 />
               }
             />
           )}
           <SettingsSearchTarget id={searchableSetting("sandbox-variables").id}>
             <EnvironmentVariablesEditor
-              description="Every new sandbox starts with these, such as CLAUDE_CODE_OAUTH_TOKEN from `claude setup-token`. Sandboxes keep the values they were created with."
+              description="Every new cube starts with these, such as CLAUDE_CODE_OAUTH_TOKEN from `claude setup-token`. Cubes keep the values they were created with."
               environment={settings.sandboxEnvironment}
               onChange={(sandboxEnvironment) => void save({ sandboxEnvironment })}
             />
@@ -346,7 +346,7 @@ function FlySettings({
             ? accountQuery.isPending
               ? "Checking the saved token…"
               : "Connected. Paste a new token to replace it."
-            : "Create one with `fly tokens create org` or under Tokens in the Fly dashboard. A separate organization for sandboxes keeps this token away from your other apps.")
+            : "Create one with `fly tokens create org` or under Tokens in the Fly dashboard. A separate organization for cubes keeps this token away from your other apps.")
         }
         control={
           <form
@@ -386,7 +386,7 @@ function FlySettings({
         <>
           <SettingsRow
             {...searchableSetting("sandbox-fly-organization")}
-            description="The Fly organization sandboxes are created and billed in."
+            description="The Fly organization cubes are created and billed in."
             control={
               account && account.organizations.length > 0 ? (
                 <Select
@@ -426,7 +426,7 @@ function FlySettings({
           />
           <SettingsRow
             {...searchableSetting("sandbox-fly-region")}
-            description="Where sandboxes run. The closest region keeps the desktop and terminal responsive."
+            description="Where cubes run. The closest region keeps the desktop and terminal responsive."
             control={
               account ? (
                 <Select

@@ -636,24 +636,24 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "sandboxes",
-    title: "Sandboxes",
+    title: "Cubes",
     to: "/settings/integrations",
-    searchTerms: ["docker container isolated environment task host"],
+    searchTerms: ["sandbox vm docker container isolated environment task host"],
     environmentOnly: true,
     scope: "environment-defaults",
   },
   {
     id: "sandboxes-enabled",
-    title: "Host sandboxes",
+    title: "Host cubes",
     to: "/settings/integrations",
     targetId: "sandboxes",
-    searchTerms: ["docker container isolated environment task enable"],
+    searchTerms: ["sandbox vm docker container isolated environment task enable"],
     environmentOnly: true,
     scope: "environment-defaults",
   },
   {
     id: "sandbox-backend",
-    title: "Sandboxes run on",
+    title: "Cubes run on",
     to: "/settings/integrations",
     targetId: "sandboxes",
     searchTerms: ["docker fly cloud vm machines backend where"],
@@ -662,7 +662,7 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "sandbox-size",
-    title: "Sandbox size",
+    title: "Cube size",
     to: "/settings/integrations",
     targetId: "sandboxes",
     searchTerms: ["cpu memory ram small medium large resources"],
@@ -707,7 +707,7 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "sandbox-keep-ready",
-    title: "Keep a sandbox ready",
+    title: "Keep a cube ready",
     to: "/settings/integrations",
     targetId: "sandboxes",
     searchTerms: ["sandbox spare warm pool fast start prewarm ready"],
@@ -716,7 +716,7 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "sandbox-delete",
-    title: "Delete stopped sandboxes",
+    title: "Delete stopped cubes",
     to: "/settings/integrations",
     targetId: "sandboxes",
     searchTerms: ["sandbox remove cleanup retention days old stopped"],
@@ -725,7 +725,7 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "sandbox-image",
-    title: "Sandbox image",
+    title: "Cube image",
     to: "/settings/integrations",
     targetId: "sandboxes",
     searchTerms: ["docker container"],
@@ -734,7 +734,7 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "sandbox-address",
-    title: "Sandbox address",
+    title: "Cube address",
     to: "/settings/integrations",
     targetId: "sandboxes",
     searchTerms: ["publish host tailscale lan loopback port"],
@@ -743,7 +743,7 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "sandbox-variables",
-    title: "Sandbox variables",
+    title: "Cube variables",
     to: "/settings/integrations",
     targetId: "sandboxes",
     searchTerms: [

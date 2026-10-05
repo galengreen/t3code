@@ -27,9 +27,9 @@ interface BranchToolbarEnvironmentSelectorProps {
   onAutoEnvironment?: (() => void) | undefined;
   /** Set while the draft will start in a new sandbox; the label to show. */
   sandboxLabel?: string | undefined;
-  /** Offers "New sandbox" when the current environment can create one. */
+  /** Offers "New cube" when the current environment can create one. */
   onSandboxEnvironment?: (() => void) | undefined;
-  /** Shows "New sandbox" disabled with this reason when the environment hosts sandboxes but this draft cannot use one. */
+  /** Shows "New cube" disabled with this reason when the environment hosts sandboxes but this draft cannot use one. */
   sandboxUnavailableReason?: string | undefined;
   envLocked: boolean;
   environmentId: EnvironmentId;
@@ -64,7 +64,7 @@ export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvir
         value: env.environmentId,
         label: env.label,
       })),
-      ...(onSandboxEnvironment ? [{ value: "sandbox", label: sandboxLabel ?? "New sandbox" }] : []),
+      ...(onSandboxEnvironment ? [{ value: "sandbox", label: sandboxLabel ?? "New cube" }] : []),
     ],
     [
       availableEnvironments,
@@ -199,7 +199,7 @@ export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvir
             <SelectItem value="sandbox">
               <span className="inline-flex items-center gap-1.5">
                 <BoxIcon className="size-3" aria-hidden="true" />
-                {sandboxLabel ?? "New sandbox"}
+                {sandboxLabel ?? "New cube"}
               </span>
             </SelectItem>
           ) : sandboxUnavailableReason ? (
@@ -207,7 +207,7 @@ export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvir
               <span className="flex flex-col">
                 <span className="inline-flex items-center gap-1.5">
                   <BoxIcon className="size-3" aria-hidden="true" />
-                  New sandbox
+                  New cube
                 </span>
                 <span className="text-muted-foreground text-xs">{sandboxUnavailableReason}</span>
               </span>

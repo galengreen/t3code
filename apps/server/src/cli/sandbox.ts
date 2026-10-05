@@ -22,7 +22,7 @@ import { type CliAuthLocationFlags, projectLocationFlags, resolveCliAuthConfig }
 
 class NoLiveServerError extends Error {
   override readonly message =
-    "No T3 server is running for this home. Start it (`t3 serve`): sandbox commands go through it, so it stays the only one managing sandboxes.";
+    "No T3 server is running for this home. Start it (`t3 serve`): cube commands go through it, so it stays the only one managing cubes.";
 }
 
 /**
@@ -50,7 +50,7 @@ const runWithSandboxes = <A, E>(
       if (Option.isNone(runtimeState)) return yield* Effect.fail(new NoLiveServerError());
       const environmentAuth = yield* EnvironmentAuth.EnvironmentAuth;
       return yield* Effect.acquireUseRelease(
-        environmentAuth.issueSession({ scopes: AuthAdministrativeScopes, label: "t3 sandbox cli" }),
+        environmentAuth.issueSession({ scopes: AuthAdministrativeScopes, label: "t3 cube cli" }),
         (issued) =>
           Effect.gen(function* () {
             const client = (yield* HttpApiClient.make(EnvironmentHttpApi, {
@@ -82,15 +82,15 @@ const runWithSandboxes = <A, E>(
 const formatSandbox = (sandbox: SandboxSummary) =>
   [sandbox.id, sandbox.state.padEnd(7), sandbox.label, sandbox.httpBaseUrl ?? ""].join("  ");
 
-const idArgument = Argument.String("id").pipe(Argument.withDescription("Sandbox id."));
+const idArgument = Argument.String("id").pipe(Argument.withDescription("Cube id."));
 
 const sandboxListCommand = Command.make("list", { ...projectLocationFlags }).pipe(
-  Command.withDescription("List this server's sandboxes."),
+  Command.withDescription("List this server's cubes."),
   Command.withHandler((flags) =>
     runWithSandboxes(flags, (sandboxes) =>
       sandboxes.list.pipe(
         Effect.flatMap((list) =>
-          Console.log(list.length === 0 ? "No sandboxes." : list.map(formatSandbox).join("\n")),
+          Console.log(list.length === 0 ? "No cubes." : list.map(formatSandbox).join("\n")),
         ),
       ),
     ),
@@ -100,11 +100,11 @@ const sandboxListCommand = Command.make("list", { ...projectLocationFlags }).pip
 const sandboxCreateCommand = Command.make("create", {
   ...projectLocationFlags,
   repo: Flag.String("repo").pipe(
-    Flag.withDescription("Git URL to clone into the sandbox's ~/work and add as a project."),
+    Flag.withDescription("Git URL to clone into the cube's ~/work and add as a project."),
     Flag.optional,
   ),
 }).pipe(
-  Command.withDescription("Create and start a sandbox, waiting until its server answers."),
+  Command.withDescription("Create and start a cube, waiting until its server answers."),
   Command.withHandler((flags) =>
     runWithSandboxes(flags, (sandboxes) =>
       sandboxes
@@ -115,7 +115,7 @@ const sandboxCreateCommand = Command.make("create", {
 );
 
 const sandboxStartCommand = Command.make("start", { ...projectLocationFlags, id: idArgument }).pipe(
-  Command.withDescription("Start a stopped sandbox."),
+  Command.withDescription("Start a stopped cube."),
   Command.withHandler((flags) =>
     runWithSandboxes(flags, (sandboxes) =>
       sandboxes
@@ -126,7 +126,7 @@ const sandboxStartCommand = Command.make("start", { ...projectLocationFlags, id:
 );
 
 const sandboxStopCommand = Command.make("stop", { ...projectLocationFlags, id: idArgument }).pipe(
-  Command.withDescription("Stop a sandbox. Its files and conversations are kept."),
+  Command.withDescription("Stop a cube. Its files and conversations are kept."),
   Command.withHandler((flags) =>
     runWithSandboxes(flags, (sandboxes) =>
       sandboxes
@@ -137,18 +137,18 @@ const sandboxStopCommand = Command.make("stop", { ...projectLocationFlags, id: i
 );
 
 const sandboxRemoveCommand = Command.make("rm", { ...projectLocationFlags, id: idArgument }).pipe(
-  Command.withDescription("Delete a sandbox and everything in it."),
+  Command.withDescription("Delete a cube and everything in it."),
   Command.withHandler((flags) =>
     runWithSandboxes(flags, (sandboxes) =>
       sandboxes
         .remove({ id: flags.id })
-        .pipe(Effect.andThen(Console.log(`Removed sandbox ${flags.id}.`))),
+        .pipe(Effect.andThen(Console.log(`Removed cube ${flags.id}.`))),
     ),
   ),
 );
 
 const sandboxPairCommand = Command.make("pair", { ...projectLocationFlags, id: idArgument }).pipe(
-  Command.withDescription("Print a one-time pairing URL for a running sandbox."),
+  Command.withDescription("Print a one-time pairing URL for a running cube."),
   Command.withHandler((flags) =>
     runWithSandboxes(flags, (sandboxes) =>
       sandboxes
@@ -164,9 +164,9 @@ const sandboxPairCommand = Command.make("pair", { ...projectLocationFlags, id: i
   ),
 );
 
-export const sandboxCommand = Command.make("sandbox").pipe(
+export const sandboxCommand = Command.make("cube").pipe(
   Command.withDescription(
-    "Create and manage sandboxes, one isolated T3 environment each, through the running server.",
+    "Create and manage cubes, one isolated T3 environment each, through the running server.",
   ),
   Command.withSubcommands([
     sandboxListCommand,

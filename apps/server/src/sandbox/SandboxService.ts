@@ -79,7 +79,7 @@ const encodeRemovedRecords = Schema.encodeEffect(RemovedRecords);
 const decodeDescriptor = Schema.decodeUnknownEffect(EnvironmentDescriptor);
 
 /** A spare is named before anyone knows what it will be for, so every sandbox is named by id. */
-const sandboxLabel = (id: SandboxId) => `Sandbox ${id.slice(0, 6)}`;
+const sandboxLabel = (id: SandboxId) => `Cube ${id.slice(0, 6)}`;
 
 /**
  * The settings a sandbox's machine is made with. A spare made under a
@@ -205,7 +205,7 @@ const make = Effect.gen(function* () {
     const current = yield* readSettings;
     if (!current.enableSandboxes) {
       return yield* new SandboxUnavailableError({
-        reason: "Sandboxes are turned off for this server.",
+        reason: "Cubes are turned off for this server.",
       });
     }
     return current;
@@ -266,7 +266,7 @@ const make = Effect.gen(function* () {
           new SandboxOperationError({
             operation,
             id: machine.id,
-            cause: "Sandbox is not running.",
+            cause: "Cube is not running.",
           }),
         )
       : waitForHttpReady({

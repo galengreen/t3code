@@ -89,7 +89,7 @@ export class SandboxNotFoundError extends Schema.TaggedError<SandboxNotFoundErro
   { httpApiStatus: 404 },
 ) {
   override get message(): string {
-    return `Sandbox ${this.id} was not found.`;
+    return `Cube ${this.id} was not found.`;
   }
 }
 
@@ -99,7 +99,7 @@ export class SandboxNotRunningError extends Schema.TaggedError<SandboxNotRunning
   { httpApiStatus: 409 },
 ) {
   override get message(): string {
-    return `Sandbox ${this.id} is stopped. Start it first.`;
+    return `Cube ${this.id} is stopped. Start it first.`;
   }
 }
 
@@ -125,10 +125,10 @@ export class SandboxOperationError extends Schema.TaggedError<SandboxOperationEr
 ) {
   override get message(): string {
     if (this.operation === "account") return "Could not look up the Fly account.";
-    if (this.operation === "clone") return "Could not clone the repository into the sandbox.";
+    if (this.operation === "clone") return "Could not clone the repository into the cube.";
     return this.id === undefined
-      ? `Could not ${this.operation} sandboxes.`
-      : `Could not ${this.operation} sandbox ${this.id}.`;
+      ? `Could not ${this.operation} cubes.`
+      : `Could not ${this.operation} cube ${this.id}.`;
   }
 }
 

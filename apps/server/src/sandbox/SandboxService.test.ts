@@ -197,7 +197,7 @@ describe("SandboxService", () => {
           repositoryUrl: "https://github.com/example/app.git",
         });
         expect(created).toMatchObject({
-          label: `Sandbox ${created.id.slice(0, 6)}`,
+          label: `Cube ${created.id.slice(0, 6)}`,
           image: "sandbox:test",
           state: "running",
           httpBaseUrl: "http://100.64.0.7:49999",
@@ -213,7 +213,7 @@ describe("SandboxService", () => {
             "100.64.0.7::7777/tcp",
             `t3code.sandbox.id=${created.id}`,
             `t3-sandbox-${created.id}-home:/home/dev`,
-            `T3_SANDBOX_LABEL=Sandbox ${created.id.slice(0, 6)}`,
+            `T3_SANDBOX_LABEL=Cube ${created.id.slice(0, 6)}`,
             `T3_ENVIRONMENT_ID=${created.environmentId}`,
             `t3code.sandbox.environment=${created.environmentId}`,
           ]),

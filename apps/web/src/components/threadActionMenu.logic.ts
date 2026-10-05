@@ -237,7 +237,7 @@ export function buildThreadActionMenuItems(
       ? [
           {
             id: "sandbox" as const,
-            label: `Sandbox (${
+            label: `Cube (${
               state.sandbox.wakesOnRequest && state.sandbox.state === "stopped"
                 ? "asleep"
                 : SANDBOX_STATE_LABELS[state.sandbox.state]
@@ -250,12 +250,12 @@ export function buildThreadActionMenuItems(
                   : []
                 : [
                     state.sandbox.state === "running"
-                      ? { id: "sandbox:stop" as const, label: "Stop sandbox" }
-                      : { id: "sandbox:start" as const, label: "Start sandbox" },
+                      ? { id: "sandbox:stop" as const, label: "Stop cube" }
+                      : { id: "sandbox:start" as const, label: "Start cube" },
                   ]),
               {
                 id: "sandbox:delete" as const,
-                label: "Delete sandbox…",
+                label: "Delete cube…",
                 destructive: true,
                 separatorBefore: !(
                   state.sandbox.wakesOnRequest && state.sandbox.state !== "running"

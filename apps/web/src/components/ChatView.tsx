@@ -4511,7 +4511,7 @@ export default function ChatView(props: ChatViewProps) {
         id: "sandbox-attachments",
         title: "Keep attachments on this machine",
         description:
-          "Remove attachments before starting in a sandbox, then attach them once it is running.",
+          "Remove attachments before starting in a cube, then attach them once it is running.",
       });
       return;
     }
@@ -4522,7 +4522,7 @@ export default function ChatView(props: ChatViewProps) {
       worktreePath: null,
     });
   }, [composerHasAttachments, draftId, envLocked, setDraftThreadContext]);
-  const sandboxLabel = sandboxSelected ? "New sandbox" : undefined;
+  const sandboxLabel = sandboxSelected ? "New cube" : undefined;
   /** The message a sandbox launch will send, as it was when the user sent it. */
   const [sandboxLaunchPrompt, setSandboxLaunchPrompt] = useState("");
   /** Set while "Run on this machine" waits for the draft to leave sandbox mode. */
@@ -7355,7 +7355,7 @@ export default function ChatView(props: ChatViewProps) {
       id: `sandbox-asleep:${activeSandbox.sandbox.id}`,
       variant: "info",
       icon: <BoxIcon />,
-      title: waking ? "Waking this thread's sandbox…" : "This thread's sandbox is asleep",
+      title: waking ? "Waking this thread's cube…" : "This thread's cube is asleep",
       description: waking
         ? "It stopped while idle and is starting again"
         : "It stopped while idle. Wake it to continue",

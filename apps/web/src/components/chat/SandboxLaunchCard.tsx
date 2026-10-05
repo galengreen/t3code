@@ -26,7 +26,7 @@ function useNowWhile(active: boolean): number {
 function stageLabel(id: SandboxLaunchStageId, repositoryName: string | null): string {
   switch (id) {
     case "create":
-      return "Start sandbox";
+      return "Start cube";
     case "connect":
       return "Connect";
     case "clone":
@@ -78,7 +78,7 @@ export function SandboxLaunchCard({
 
   return (
     <section
-      aria-label="Sandbox setup"
+      aria-label="Cube setup"
       data-sandbox-launch-phase={state.phase}
       className="flex flex-col gap-4"
     >
@@ -87,7 +87,7 @@ export function SandboxLaunchCard({
           <p className="line-clamp-6 text-sm whitespace-pre-wrap">{prompt}</p>
         </div>
         <span className="me-1 text-2xs text-muted-foreground/70">
-          {running ? "Sends when the sandbox is ready" : "Not sent"}
+          {running ? "Sends when the cube is ready" : "Not sent"}
         </span>
       </div>
 
@@ -99,9 +99,7 @@ export function SandboxLaunchCard({
               running ? "text-muted-foreground" : "text-destructive-foreground",
             )}
           >
-            <span className="truncate">
-              {running ? "Setting up sandbox…" : "Sandbox setup failed"}
-            </span>
+            <span className="truncate">{running ? "Setting up cube…" : "Cube setup failed"}</span>
             <span className="ml-auto shrink-0 text-xs text-muted-foreground">
               {formatDuration(totalElapsed)}
             </span>
