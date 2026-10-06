@@ -12,7 +12,6 @@ import {
   type DevicePlatform,
   EnvironmentId,
   ThreadId,
-  type ChatFileAttachment,
   type ScopedThreadRef,
 } from "@t3tools/contracts";
 import { create } from "zustand";
@@ -20,6 +19,7 @@ import { createJSONStorage, persist } from "zustand/middleware";
 
 import { resolveStorage } from "./lib/storage";
 import type { ThreadPanelPresentation } from "./rightPanelLayout";
+import type { ChatFileAttachment } from "./types";
 
 const RIGHT_PANEL_KINDS = [
   "diff",

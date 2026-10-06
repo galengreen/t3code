@@ -321,11 +321,17 @@ import {
   ScheduledTaskListInput,
   ScheduledTaskListResult,
   ScheduledTaskRunNowInput,
+  ScheduledTaskRotateWebhookTokenInput,
+  ScheduledTaskListWebhookDeliveriesInput,
+  ScheduledTaskListWebhookDeliveriesResult,
+  ScheduledTaskGetWebhookDeliveryInput,
+  ScheduledTaskGetWebhookDeliveryResult,
   ScheduledTaskRunNowResult,
   ScheduledTaskSetEnabledInput,
   ScheduledTaskUpsertInput,
   ScheduledTaskMutationResult,
 } from "./scheduledTask.ts";
+import { SecretRequestAnswerInput, SecretRequestError } from "./secretRequest.ts";
 import {
   ProjectCloneActionInput,
   ProjectCloneActionResult,
@@ -498,6 +504,10 @@ export const WS_METHODS = {
   scheduledTasksSetEnabled: "scheduledTasks.setEnabled",
   scheduledTasksDelete: "scheduledTasks.delete",
   scheduledTasksRunNow: "scheduledTasks.runNow",
+  scheduledTasksRotateWebhookToken: "scheduledTasks.rotateWebhookToken",
+  secretsAnswerRequest: "secrets.answerRequest",
+  scheduledTasksListWebhookDeliveries: "scheduledTasks.listWebhookDeliveries",
+  scheduledTasksGetWebhookDelivery: "scheduledTasks.getWebhookDelivery",
 
   // Cloud environment methods
   cloudGetRelayClientStatus: "cloud.getRelayClientStatus",
@@ -1761,6 +1771,38 @@ const WsScheduledTasksRunNowRpc = Rpc.make(WS_METHODS.scheduledTasksRunNow, {
   error: Schema.Union([ScheduledTaskError, EnvironmentAuthorizationError]),
 });
 
+const WsScheduledTasksRotateWebhookTokenRpc = Rpc.make(
+  WS_METHODS.scheduledTasksRotateWebhookToken,
+  {
+    payload: ScheduledTaskRotateWebhookTokenInput,
+    success: ScheduledTaskMutationResult,
+    error: Schema.Union([ScheduledTaskError, EnvironmentAuthorizationError]),
+  },
+);
+
+const WsSecretsAnswerRequestRpc = Rpc.make(WS_METHODS.secretsAnswerRequest, {
+  payload: SecretRequestAnswerInput,
+  error: Schema.Union([SecretRequestError, EnvironmentAuthorizationError]),
+});
+
+const WsScheduledTasksListWebhookDeliveriesRpc = Rpc.make(
+  WS_METHODS.scheduledTasksListWebhookDeliveries,
+  {
+    payload: ScheduledTaskListWebhookDeliveriesInput,
+    success: ScheduledTaskListWebhookDeliveriesResult,
+    error: Schema.Union([ScheduledTaskError, EnvironmentAuthorizationError]),
+  },
+);
+
+const WsScheduledTasksGetWebhookDeliveryRpc = Rpc.make(
+  WS_METHODS.scheduledTasksGetWebhookDelivery,
+  {
+    payload: ScheduledTaskGetWebhookDeliveryInput,
+    success: ScheduledTaskGetWebhookDeliveryResult,
+    error: Schema.Union([ScheduledTaskError, EnvironmentAuthorizationError]),
+  },
+);
+
 const WsSubscribeAuthAccessRpc = Rpc.make(WS_METHODS.subscribeAuthAccess, {
   payload: Schema.Struct({}),
   success: AuthAccessStreamEvent,
@@ -1846,6 +1888,10 @@ export const WsRpcGroup = RpcGroup.make(
   WsScheduledTasksSetEnabledRpc,
   WsScheduledTasksDeleteRpc,
   WsScheduledTasksRunNowRpc,
+  WsScheduledTasksRotateWebhookTokenRpc,
+  WsSecretsAnswerRequestRpc,
+  WsScheduledTasksListWebhookDeliveriesRpc,
+  WsScheduledTasksGetWebhookDeliveryRpc,
   WsServerReportClientActivityRpc,
   WsServerReportHostPowerStateRpc,
   WsServerGetBackgroundPolicyRpc,

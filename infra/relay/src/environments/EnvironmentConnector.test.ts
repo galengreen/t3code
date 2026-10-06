@@ -194,6 +194,7 @@ function makeAllocations(
   },
 ): ManagedEndpointAllocations.ManagedEndpointAllocations["Service"] {
   return {
+    getByTunnelName: () => Effect.die("unused getByTunnelName"),
     get: () => Effect.succeed(allocation),
     reserve: () => Effect.die("unused"),
     recordTunnel: () => Effect.die("unused"),
@@ -229,6 +230,8 @@ function makeLinks(
         environmentPublicKey: environmentKeyPair.publicKey,
         ...overrides,
       }),
+    findActiveManagedForEnvironment: () => Effect.succeed([]),
+    setHoldWebhooksWhileOffline: () => Effect.void,
     revokeForUser: () => Effect.succeed(false),
   };
 }

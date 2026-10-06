@@ -751,6 +751,8 @@ function eventPathContainsSelector(event: Event, selector: string): boolean {
   return path.some((target) => target instanceof Element && target.closest(selector));
 }
 
+const SECRET_REQUEST_SELECTOR = '[data-v2-item-type="secret_request"]';
+
 /**
  * Whether input that landed outside any editable or interactive element
  * should be redirected into the composer. Shared by type-to-focus and
@@ -758,6 +760,9 @@ function eventPathContainsSelector(event: Event, selector: string): boolean {
  */
 function shouldRedirectInputToComposer(event: Event): boolean {
   if (event.defaultPrevented) return false;
+  // Near a pending secret request, input is meant for its private field: it
+  // must never land in the composer draft, which is persisted and sent.
+  if (eventPathContainsSelector(event, SECRET_REQUEST_SELECTOR)) return false;
   if (eventPathContainsSelector(event, TYPE_TO_FOCUS_EDITABLE_SELECTOR)) return false;
   if (eventPathContainsSelector(event, TYPE_TO_FOCUS_INTERACTIVE_SELECTOR)) return false;
   if (document.querySelector(TYPE_TO_FOCUS_FLOATING_LAYER_SELECTOR)) return false;
@@ -3655,6 +3660,7 @@ export default function ChatView(props: ChatViewProps) {
         turnItems: serverProjection.turnItems,
         activeProviderThreadId: serverProjection.thread.activeProviderThreadId,
         runs: serverProjection.runs,
+        pullRequests: serverProjection.thread.pullRequests,
       }),
     ];
   }, [serverProjection]);
