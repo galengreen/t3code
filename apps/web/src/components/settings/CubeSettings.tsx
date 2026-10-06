@@ -1,10 +1,16 @@
-import type { EnvironmentId, CubeBackend, CubeSize, ServerSettingsPatch } from "@t3tools/contracts";
+import type {
+  CubeBackend,
+  CubeClaudeSignInState,
+  CubeSize,
+  EnvironmentId,
+  ServerSettingsPatch,
+} from "@t3tools/contracts";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 
 import { environmentCatalog } from "../../connection/catalog";
 import { useEnvironmentSettings } from "../../hooks/useSettings";
-import { createHome, cubeEnvironment } from "../../state/cube";
+import { createHome, cubeEnvironment, signInCubesWithClaude } from "../../state/cube";
 import { useEnvironments } from "../../state/environments";
 import { serverEnvironment } from "../../state/server";
 import { useEnvironmentQuery } from "../../state/query";
@@ -23,6 +29,8 @@ import {
 } from "./settingsLayout";
 import { searchableSetting } from "./settingsSearch";
 import { useSettingsScope } from "./SettingsScopeContext";
+
+const ProviderAuthTerminal = lazy(() => import("./ProviderAuthTerminal"));
 
 /**
  * Cube hosting for one environment. Cubes run on the machine that
@@ -308,9 +316,10 @@ function CubeControls({ environmentId }: { readonly environmentId: EnvironmentId
               }
             />
           )}
+          <CubeClaudeSignIn environmentId={environmentId} />
           <SettingsSearchTarget id={searchableSetting("cube-variables").id}>
             <EnvironmentVariablesEditor
-              description="Every new cube starts with these, such as CLAUDE_CODE_OAUTH_TOKEN from `claude setup-token`. Cubes keep the values they were created with."
+              description="Every new cube starts with these, such as API keys. Cubes keep the values they were created with."
               environment={settings.cubeEnvironment}
               onChange={(cubeEnvironment) => void save({ cubeEnvironment })}
             />
@@ -318,6 +327,86 @@ function CubeControls({ environmentId }: { readonly environmentId: EnvironmentId
         </>
       ) : null}
     </>
+  );
+}
+
+/**
+ * Signs new cubes in to Claude by running `claude setup-token` on the host,
+ * which saves the token as CLAUDE_CODE_OAUTH_TOKEN. The host's own login is
+ * not copied: cubes refreshing it would log this computer out.
+ */
+function CubeClaudeSignIn({ environmentId }: { readonly environmentId: EnvironmentId }) {
+  const signedIn = useEnvironmentSettings(environmentId, (settings) =>
+    settings.cubeEnvironment.some((variable) => variable.name === "CLAUDE_CODE_OAUTH_TOKEN"),
+  );
+  const run = useAtomCommand(signInCubesWithClaude, { reportFailure: false });
+  const send = useAtomCommand(cubeEnvironment.claudeSignInInput, { reportFailure: false });
+  const [state, setState] = useState<CubeClaudeSignInState | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  // Keystrokes go one at a time, in order.
+  const sending = useRef(Promise.resolve());
+  const running = state?.phase === "running";
+
+  const start = async () => {
+    setError(null);
+    setState({ phase: "running", output: "", outputOffset: 0, message: null });
+    const result = await run({ environmentId, onState: setState });
+    if (result._tag === "Failure") {
+      const failure = squashAtomCommandFailure(result);
+      setState(null);
+      setError(failure instanceof Error ? failure.message : "Claude sign-in stopped.");
+    }
+  };
+  const input = (data: string, size?: { readonly cols: number; readonly rows: number }) => {
+    sending.current = sending.current.then(async () => {
+      await send({ environmentId, input: { data, ...(size ? { size } : {}) } });
+    });
+  };
+  // Ctrl-C ends `claude setup-token`, which ends the sign-in.
+  const cancel = () => input("\u0003");
+
+  const description =
+    error ??
+    (state?.phase === "failed"
+      ? state.message
+      : state?.phase === "saved"
+        ? "Signed in. New cubes start with this Claude login."
+        : running
+          ? "Finish signing in below. The token is saved here and never shown."
+          : signedIn
+            ? "New cubes start signed in to Claude."
+            : "Sign new cubes in with your Claude subscription, instead of pasting a token.");
+
+  return (
+    <SettingsRow
+      {...searchableSetting("cube-claude")}
+      description={description}
+      control={
+        running ? (
+          <Button size="sm" variant="outline" onClick={cancel}>
+            Cancel
+          </Button>
+        ) : (
+          <Button size="sm" variant="outline" onClick={() => void start()}>
+            {signedIn ? "Sign in again" : "Sign in with Claude"}
+          </Button>
+        )
+      }
+    >
+      {running ? (
+        <div className="py-2">
+          <Suspense
+            fallback={<p className="text-xs text-muted-foreground">Loading sign-in terminal…</p>}
+          >
+            <ProviderAuthTerminal
+              output={state.output}
+              outputOffset={state.outputOffset}
+              onResponse={(response) => input(response.data, response.size)}
+            />
+          </Suspense>
+        </div>
+      ) : null}
+    </SettingsRow>
   );
 }
 

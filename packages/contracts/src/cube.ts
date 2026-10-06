@@ -110,6 +110,33 @@ export const CubeUsage = Schema.Struct({
 });
 export type CubeUsage = typeof CubeUsage.Type;
 
+/**
+ * Signing cubes in with Claude: the host runs `claude setup-token` and saves
+ * the long-lived token it prints as the cubes' CLAUDE_CODE_OAUTH_TOKEN. The
+ * terminal output stops before the token, so it never reaches a client.
+ */
+export const CubeClaudeSignInState = Schema.Struct({
+  phase: Schema.Literals(["running", "saved", "failed"]),
+  output: Schema.String.check(Schema.isMaxLength(16_384)),
+  /** Characters of output so far, so a client can write only what is new. */
+  outputOffset: NonNegativeInt,
+  /** Why it failed, as a sentence for the user; null otherwise. */
+  message: Schema.NullOr(Schema.String),
+});
+export type CubeClaudeSignInState = typeof CubeClaudeSignInState.Type;
+
+/** Keystrokes and resizes for the sign-in terminal. */
+export const CubeClaudeSignInInput = Schema.Struct({
+  data: Schema.String.check(Schema.isMaxLength(4_096)),
+  size: Schema.optionalKey(
+    Schema.Struct({
+      cols: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 500 })),
+      rows: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 200 })),
+    }),
+  ),
+});
+export type CubeClaudeSignInInput = typeof CubeClaudeSignInInput.Type;
+
 export class CubeUnavailableError extends Schema.TaggedError<CubeUnavailableError>()(
   "CubeUnavailableError",
   { reason: Schema.String },

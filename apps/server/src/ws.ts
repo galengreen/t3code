@@ -183,6 +183,7 @@ import { withTerminalOutputWindow } from "./terminal/OutputProtocol.ts";
 import * as PreviewAutomationBroker from "./mcp/PreviewAutomationBroker.ts";
 import * as DeviceService from "./device/DeviceService.ts";
 import * as CubeService from "./cube/CubeService.ts";
+import * as CubeClaudeSignIn from "./cube/CubeClaudeSignIn.ts";
 import * as CubeUsage from "./cube/CubeUsage.ts";
 import * as IdleShutdown from "./cube/IdleShutdown.ts";
 import { remoteSshDeviceHosts } from "./device/localSshDeviceHost.ts";
@@ -1230,6 +1231,7 @@ const makeWsRpcLayer = (
       const deviceService = yield* DeviceService.DeviceService;
       const cubeService = yield* CubeService.CubeService;
       const cubeUsage = yield* CubeUsage.CubeUsage;
+      const cubeClaudeSignIn = yield* CubeClaudeSignIn.CubeClaudeSignIn;
       const idleShutdown = yield* IdleShutdown.IdleShutdown;
       const deviceHostContext =
         yield* Effect.context<Effect.Services<ReturnType<typeof remoteSshDeviceHosts>>>();
@@ -3623,6 +3625,14 @@ const makeWsRpcLayer = (
           }),
         [WS_METHODS.cubeFlyAccount]: (input) =>
           observeRpcEffect(WS_METHODS.cubeFlyAccount, cubeService.flyAccount(input), {
+            "rpc.aggregate": "cube",
+          }),
+        [WS_METHODS.cubeClaudeSignIn]: (_input) =>
+          observeRpcStream(WS_METHODS.cubeClaudeSignIn, cubeClaudeSignIn.run, {
+            "rpc.aggregate": "cube",
+          }),
+        [WS_METHODS.cubeClaudeSignInInput]: (input) =>
+          observeRpcEffect(WS_METHODS.cubeClaudeSignInInput, cubeClaudeSignIn.input(input), {
             "rpc.aggregate": "cube",
           }),
         [WS_METHODS.subscribeDeviceState]: (_input) =>

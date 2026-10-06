@@ -1,19 +1,21 @@
 import {
   type EnvironmentId,
   CubeNotRunningError,
+  type CubeClaudeSignInState,
   type CubeSummary,
   WS_METHODS,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as PartitionedSemaphore from "effect/PartitionedSemaphore";
+import * as Stream from "effect/Stream";
 import * as SubscriptionRef from "effect/SubscriptionRef";
 import type { Atom } from "effect/reactivity";
 
 import type { ConnectionCatalogEntry, ConnectWhen } from "../connection/catalog.ts";
 import * as ConnectionOnboarding from "../connection/onboarding.ts";
 import * as EnvironmentRegistry from "../connection/registry.ts";
-import { request } from "../rpc/client.ts";
+import { request, runStream } from "../rpc/client.ts";
 import {
   connectIfNeeded,
   createEnvironmentRpcCommand,
@@ -53,6 +55,10 @@ export function createCubeEnvironmentAtoms<R, E>(
       label: "environment-data:cube:check-fly-token",
       tag: WS_METHODS.cubeFlyAccount,
     }),
+    claudeSignInInput: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:cube:claude-sign-in-input",
+      tag: WS_METHODS.cubeClaudeSignInInput,
+    }),
   };
 }
 
@@ -68,6 +74,25 @@ const onHost = <A, E, R>(hostEnvironmentId: EnvironmentId, effect: Effect.Effect
       ),
     ),
   );
+
+/**
+ * Runs `claude setup-token` on a host so its new cubes are signed in to
+ * Claude, reporting each terminal state; the last one says how it ended.
+ * Sending Ctrl-C through `claudeSignInInput` cancels it.
+ */
+export const runCubeClaudeSignIn = Effect.fn("clientRuntime.cube.claudeSignIn")(function* (
+  hostEnvironmentId: EnvironmentId,
+  onState: (state: CubeClaudeSignInState) => void,
+) {
+  yield* connectIfNeeded(hostEnvironmentId);
+  const registry = yield* EnvironmentRegistry.EnvironmentRegistry;
+  return yield* registry
+    .runStream(hostEnvironmentId, runStream(WS_METHODS.cubeClaudeSignIn, {}))
+    .pipe(
+      Stream.tap((state) => Effect.sync(() => onState(state))),
+      Stream.runLast,
+    );
+});
 
 /**
  * Moves cube management from a host to the cube home on Fly, which the host

@@ -191,6 +191,7 @@ import { orchestrationHttpApiLayer } from "./orchestration-v2/http.ts";
 import { projectHttpApiLayer } from "./project/http.ts";
 import { cubeHttpApiLayer } from "./cube/http.ts";
 import { serverSettingsHttpApiLayer } from "./serverSettingsHttp.ts";
+import * as CubeClaudeSignIn from "./cube/CubeClaudeSignIn.ts";
 import * as CubeUsage from "./cube/CubeUsage.ts";
 import * as NetService from "@t3tools/shared/Net";
 import * as RelayClient from "@t3tools/shared/relayClient";
@@ -425,7 +426,11 @@ const PreviewLayerLive = Layer.empty.pipe(
 
 const DesktopStreamerLayerLive = DesktopStreamer.layer.pipe(Layer.provide(ProcessRunner.layer));
 
-const CubeLayerLive = Layer.mergeAll(CubeService.layer, CubeUsage.layer).pipe(
+const CubeLayerLive = Layer.mergeAll(
+  CubeService.layer,
+  CubeUsage.layer,
+  CubeClaudeSignIn.layer.pipe(Layer.provide(PtyAdapterLive)),
+).pipe(
   Layer.provide(CubeDrivers.layer),
   Layer.provide(ServerSettingsLayerLive),
   Layer.provide(ProcessRunner.layer),

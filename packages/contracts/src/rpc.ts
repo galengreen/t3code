@@ -266,6 +266,8 @@ import {
   CubeFlyAccountInput,
   CubeUsage,
   CubeUsageInput,
+  CubeClaudeSignInInput,
+  CubeClaudeSignInState,
   CubeIdInput,
   CubePairing,
   CubeSummary,
@@ -459,6 +461,8 @@ export const WS_METHODS = {
   cubeSleep: "cube.sleep",
   cubeCreateHome: "cube.createHome",
   cubeUsage: "cube.usage",
+  cubeClaudeSignIn: "cube.claudeSignIn",
+  cubeClaudeSignInInput: "cube.claudeSignInInput",
 
   // Server meta
   serverProbe: "server.probe",
@@ -1539,6 +1543,20 @@ const WsCubeUsageRpc = Rpc.make(WS_METHODS.cubeUsage, {
   error: Schema.Union([CubeError, EnvironmentAuthorizationError]),
 });
 
+// Runs `claude setup-token` on this server, streaming its terminal, and saves
+// the token for new cubes. Ctrl-C through the input RPC cancels it.
+const WsCubeClaudeSignInRpc = Rpc.make(WS_METHODS.cubeClaudeSignIn, {
+  payload: Schema.Struct({}),
+  success: CubeClaudeSignInState,
+  error: Schema.Union([CubeError, EnvironmentAuthorizationError]),
+  stream: true,
+});
+
+const WsCubeClaudeSignInInputRpc = Rpc.make(WS_METHODS.cubeClaudeSignInInput, {
+  payload: CubeClaudeSignInInput,
+  error: Schema.Union([CubeError, EnvironmentAuthorizationError]),
+});
+
 const WsCubeFlyAccountRpc = Rpc.make(WS_METHODS.cubeFlyAccount, {
   payload: CubeFlyAccountInput,
   success: CubeFlyAccount,
@@ -2004,6 +2022,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsCubeFlyAccountRpc,
   WsCubeRemovedEnvironmentsRpc,
   WsCubeUsageRpc,
+  WsCubeClaudeSignInRpc,
+  WsCubeClaudeSignInInputRpc,
   WsCubeSleepRpc,
   WsCubeCreateHomeRpc,
   WsCubePairRpc,

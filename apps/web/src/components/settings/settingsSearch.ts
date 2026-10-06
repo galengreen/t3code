@@ -756,6 +756,15 @@ export const SETTINGS_SEARCH_ITEMS = [
     scope: "environment-defaults",
   },
   {
+    id: "cube-claude",
+    title: "Claude for cubes",
+    to: "/settings/cubes",
+    targetId: "cubes",
+    searchTerms: ["cube claude sign in login subscription setup-token token oauth"],
+    environmentOnly: true,
+    scope: "environment-defaults",
+  },
+  {
     id: "cube-variables",
     title: "Cube variables",
     to: "/settings/cubes",

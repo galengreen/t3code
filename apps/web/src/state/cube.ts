@@ -5,6 +5,7 @@ import {
   createCubeHome,
   ensureCubeEnvironment,
   findCubeByEnvironment,
+  runCubeClaudeSignIn,
   type CubeChange,
   syncCubeEnvironments,
 } from "@t3tools/client-runtime/state/cube";
@@ -12,7 +13,7 @@ import {
   createAtomCommandScheduler,
   createRuntimeCommand,
 } from "@t3tools/client-runtime/state/runtime";
-import type { EnvironmentId, CubeSummary } from "@t3tools/contracts";
+import type { EnvironmentId, CubeClaudeSignInState, CubeSummary } from "@t3tools/contracts";
 import { useAtomValue } from "@effect/atom-react";
 import * as Effect from "effect/Effect";
 import { Atom } from "effect/reactivity";
@@ -159,4 +160,17 @@ export const connectCube = createRuntimeCommand(connectionAtomRuntime, {
         ),
       ),
     ),
+});
+
+/** Signs a host's new cubes in to Claude; see `runCubeClaudeSignIn`. */
+export const signInCubesWithClaude = createRuntimeCommand(connectionAtomRuntime, {
+  label: "web:cube:claude-sign-in",
+  concurrency: {
+    mode: "singleFlight",
+    key: (input: { readonly environmentId: EnvironmentId }) => input.environmentId,
+  },
+  execute: (input: {
+    readonly environmentId: EnvironmentId;
+    readonly onState: (state: CubeClaudeSignInState) => void;
+  }) => runCubeClaudeSignIn(input.environmentId, input.onState),
 });
