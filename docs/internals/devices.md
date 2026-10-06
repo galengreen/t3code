@@ -23,6 +23,24 @@ proxy, and the MCP tools only see a hub origin and an agent-device endpoint.
 SSH hosts forward both endpoints to server loopback. Every proxied request
 also carries the host id; device ids alone are not unique across hosts.
 
+## Desktops bypass the hub
+
+A `desktop` device is an X display on the server's own machine, served by
+[`DesktopStreamer`](../../apps/server/src/device/DesktopStreamer.ts) in-process
+rather than by expo-device-hub. There is nothing to isolate: the only external
+work is spawning `ffmpeg` and `xdotool`. The proxy routes
+`/vendor/serve-desktop/*` to it under the same authentication, and it emits
+serve-emu's SEMU framing so the web and mobile viewers decode it without a third
+code path. The viewer's touch and Android-keycode messages are translated to
+mouse and keysym input on the server, which keeps the client input layer
+platform-agnostic. SSH device hosts report desktop as unavailable.
+
+A local host that can run neither simulators nor emulators never installs or
+starts the hub, and its readiness carries no hub endpoint. That is the normal
+case for a Linux container, so hub-only operations fail plainly rather than
+pulling in tools nothing can use. Agent tools follow the same rule: agents drive
+desktops with `xdotool`, so a desktop-only host does not install agent-device.
+
 ## The hub is never exposed
 
 serve-sim has a shell-exec route whose token is readable from its own

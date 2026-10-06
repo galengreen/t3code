@@ -53,6 +53,52 @@ export function DeviceControlsRail(props: {
   const settings = controls.detail?.settings;
   const inputDisabled = !handle?.inputConnected;
   const nextAppearance = settings?.appearance === "dark" ? "light" : "dark";
+  if (props.platform === "desktop") {
+    // A desktop has no hardware buttons, system settings, power control, or 3D
+    // shell: only screenshots and panel placement apply.
+    return (
+      <aside
+        aria-label="Device controls"
+        data-layout="rail"
+        className="pointer-events-none absolute inset-y-0 right-0 z-10 flex w-14 flex-col items-center gap-2 overflow-y-auto [justify-content:safe_center] py-3 pr-2 [scrollbar-width:none]"
+      >
+        <div className="pointer-events-auto flex shrink-0 flex-col items-center gap-1 overflow-y-auto rounded-full border border-border/50 bg-background/80 p-2 shadow-sm [scrollbar-width:none]">
+          <RailButton
+            tooltipSide={popupSide}
+            label={props.screenshotPending ? "Capturing screenshot" : "Save screenshot"}
+            disabled={!view.streaming || props.screenshotPending}
+            onClick={props.onScreenshot}
+          >
+            <Camera />
+          </RailButton>
+          <Menu>
+            <MenuTrigger
+              render={
+                <Button
+                  size="icon-sm"
+                  variant="ghost"
+                  aria-label="More device actions"
+                  title="More device actions"
+                />
+              }
+            >
+              <MoreHorizontal />
+            </MenuTrigger>
+            <MenuPopup side={popupSide} align="end">
+              <MenuItem onClick={props.onFloat}>
+                <PictureInPicture2 />
+                Float device over chat
+              </MenuItem>
+              <MenuItem onClick={props.onClose}>
+                <X />
+                Close device panel
+              </MenuItem>
+            </MenuPopup>
+          </Menu>
+        </div>
+      </aside>
+    );
+  }
   return (
     <aside
       aria-label="Device controls"

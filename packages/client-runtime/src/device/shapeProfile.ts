@@ -1,7 +1,7 @@
 import type { DevicePlatform } from "@t3tools/contracts";
 
 export interface DeviceShapeProfile {
-  readonly id: "ios-phone" | "ios-tablet" | "android-phone" | "android-tablet";
+  readonly id: "ios-phone" | "ios-tablet" | "android-phone" | "android-tablet" | "desktop";
   readonly bezel: number;
   readonly bodyRadius: number;
   readonly screenRadius: number;
@@ -104,6 +104,14 @@ const ANDROID_TABLET_SHAPE: DeviceShapeProfile = {
   backColor: 0x697b80,
 };
 
+/** A flat panel with no hardware: desktops never show the 3D shell, but need a profile. */
+const DESKTOP_SHAPE: DeviceShapeProfile = {
+  ...ANDROID_TABLET_SHAPE,
+  id: "desktop",
+  buttons: [],
+  camera: { ...ANDROID_TABLET_SHAPE.camera, lenses: [], flash: null },
+};
+
 /** Names identify a family when available; wide unknown screens get a generic tablet shell. */
 export function resolveDeviceShape(options: {
   platform: DevicePlatform;
@@ -114,6 +122,7 @@ export function resolveDeviceShape(options: {
   const namedTablet = /\b(ipad|tablet)\b/i.test(name);
   const namedPhone = /\b(iphone|phone)\b/i.test(name);
   const tablet = namedTablet || (!namedPhone && options.portraitAspect >= 0.6);
+  if (options.platform === "desktop") return DESKTOP_SHAPE;
   return options.platform === "ios"
     ? tablet
       ? IOS_TABLET_SHAPE

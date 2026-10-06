@@ -36,6 +36,7 @@ import {
   type ThreadId,
 } from "@t3tools/contracts";
 import * as FileSystem from "effect/FileSystem";
+import * as Option from "effect/Option";
 import { resolveNodeExecutable, nodeRuntimeUnavailableMessage } from "@t3tools/shared/nodeRuntime";
 import * as Path from "effect/Path";
 import { ensureAgentDevice, ensureDeviceHub } from "./DeviceToolchain.ts";
@@ -63,6 +64,7 @@ import { isLocalSshDeviceHost, remoteSshDeviceHosts } from "./localSshDeviceHost
 
 import { readDeviceDetail, runDeviceAction } from "./DeviceActions.ts";
 import * as ProcessRunner from "../processRunner.ts";
+import * as DesktopStreamer from "./DesktopStreamer.ts";
 import * as DeviceHost from "./DeviceHost.ts";
 import * as SshDeviceHost from "./SshDeviceHost.ts";
 import * as Exit from "effect/Exit";
@@ -162,7 +164,11 @@ interface ServiceState {
 }
 
 const vendorPrefix = (platform: DevicePlatform) =>
-  platform === "ios" ? "/vendor/serve-sim" : "/vendor/serve-emu";
+  platform === "ios"
+    ? "/vendor/serve-sim"
+    : platform === "desktop"
+      ? "/vendor/serve-desktop"
+      : "/vendor/serve-emu";
 
 export const makeWithHosts = Effect.fn("DeviceService.makeWithHosts")(function* (
   hosts: ReadonlyMap<DeviceHostId, DeviceHost.DeviceHost["Service"]>,
@@ -316,7 +322,12 @@ export const makeWithHosts = Effect.fn("DeviceService.makeWithHosts")(function* 
       if (!deviceSettings.enabled || !deviceSettings.agentAccessEnabled) return null;
       const host = yield* resolveHost(hostId);
       const summary = yield* host.summary;
-      if (summary.kind === "local" && !summary.platforms.some((platform) => platform.available))
+      // agent-device drives simulators and emulators only; desktops are driven
+      // with xdotool, so a desktop-only host needs no agent tools.
+      if (
+        summary.kind === "local" &&
+        !summary.platforms.some((platform) => platform.available && platform.platform !== "desktop")
+      )
         return null;
       const ready = yield* host
         .ensureAgentReady((phase, detail) =>
@@ -377,7 +388,31 @@ export const makeWithHosts = Effect.fn("DeviceService.makeWithHosts")(function* 
       ),
     );
 
+  // Desktops are served in-process on the local host only; tests that build
+  // the service from fake hosts run without a streamer.
+  const desktopStreamer = yield* Effect.serviceOption(DesktopStreamer.DesktopStreamer);
+
+  /** Hub-only operations fail plainly on a host that has no simulators or emulators. */
+  const hubOrigin = (
+    ready: DeviceReadiness,
+    operation: string,
+  ): Effect.Effect<string, DeviceOperationError> =>
+    ready.hub === null
+      ? Effect.fail(
+          new DeviceOperationError({
+            operation,
+            reason: "request_failed",
+            cause: new Error("This host has no simulators or emulators."),
+          }),
+        )
+      : Effect.succeed(ready.hub.origin);
+
   const fetchDevices = Effect.fn("DeviceService.fetchDevices")(function* (ready: DeviceReadiness) {
+    const desktops =
+      ready.hostId === LOCAL_DEVICE_HOST_ID && Option.isSome(desktopStreamer)
+        ? yield* desktopStreamer.value.listDisplays
+        : [];
+    if (ready.hub === null) return { devices: [...desktops], detail: undefined };
     const list = yield* hubJson(
       HttpClientRequest.get(`${ready.hub.origin}/api/devices`),
       HubDeviceList,
@@ -421,6 +456,7 @@ export const makeWithHosts = Effect.fn("DeviceService.makeWithHosts")(function* 
         }
       }
     }
+    devices.push(...desktops);
     return { devices, detail: list.errors?.map((error) => error.message).join("\n") || undefined };
   });
 
@@ -604,7 +640,10 @@ export const makeWithHosts = Effect.fn("DeviceService.makeWithHosts")(function* 
     ready: DeviceReadiness,
     device: DeviceSummary,
   ) {
-    const result = yield* HttpClientRequest.post(`${ready.hub.origin}/api/devices/boot`).pipe(
+    // A desktop display is either running or absent; there is nothing to boot.
+    if (device.platform === "desktop") return device.id;
+    const origin = yield* hubOrigin(ready, "boot");
+    const result = yield* HttpClientRequest.post(`${origin}/api/devices/boot`).pipe(
       HttpClientRequest.bodyJson({ platform: device.platform, id: device.id, name: device.name }),
       Effect.mapError(
         (cause) =>
@@ -629,9 +668,7 @@ export const makeWithHosts = Effect.fn("DeviceService.makeWithHosts")(function* 
     if (device.platform === "ios") {
       // Booting alone does not attach a serve-sim helper; the grid start
       // does both and is idempotent for a booted simulator.
-      yield* HttpClientRequest.post(
-        `${ready.hub.origin}${vendorPrefix("ios")}/grid/api/start`,
-      ).pipe(
+      yield* HttpClientRequest.post(`${origin}${vendorPrefix("ios")}/grid/api/start`).pipe(
         HttpClientRequest.bodyJson({ udid: device.id }),
         Effect.mapError(
           (cause) =>
@@ -682,9 +719,8 @@ export const makeWithHosts = Effect.fn("DeviceService.makeWithHosts")(function* 
       }
     } else if (device.platform === "ios" && device.booted) {
       // A simulator booted outside T3 has no helper attached yet.
-      yield* HttpClientRequest.post(
-        `${ready.hub.origin}${vendorPrefix("ios")}/grid/api/start`,
-      ).pipe(
+      const origin = yield* hubOrigin(ready, "open");
+      yield* HttpClientRequest.post(`${origin}${vendorPrefix("ios")}/grid/api/start`).pipe(
         HttpClientRequest.bodyJson({ udid: device.id }),
         Effect.mapError(
           (cause) =>
@@ -741,11 +777,19 @@ export const makeWithHosts = Effect.fn("DeviceService.makeWithHosts")(function* 
   ) {
     const ready = yield* readiness(hostId);
     const postShutdown = (path: string, body: Record<string, string>) =>
-      HttpClientRequest.post(`${ready.hub.origin}${path}`).pipe(
-        HttpClientRequest.bodyJson(body),
-        Effect.mapError(
-          (cause) =>
-            new DeviceOperationError({ operation: "shutdown", reason: "invalid_payload", cause }),
+      hubOrigin(ready, "shutdown").pipe(
+        Effect.flatMap((origin) =>
+          HttpClientRequest.post(`${origin}${path}`).pipe(
+            HttpClientRequest.bodyJson(body),
+            Effect.mapError(
+              (cause) =>
+                new DeviceOperationError({
+                  operation: "shutdown",
+                  reason: "invalid_payload",
+                  cause,
+                }),
+            ),
+          ),
         ),
         Effect.flatMap((request) => hubJson(request, HubActionResult, "shutdown")),
         Effect.flatMap((result) =>
@@ -765,19 +809,21 @@ export const makeWithHosts = Effect.fn("DeviceService.makeWithHosts")(function* 
     // across a reboot. serve-sim runs simctl bare, though, so a simulator that is
     // already off fails there. Accept that failure only when the hub confirms
     // the simulator is off; a failure on a running one still surfaces.
-    yield* platform === "ios"
-      ? postShutdown(`${vendorPrefix("ios")}/grid/api/shutdown`, { udid: deviceId }).pipe(
-          Effect.catch((cause) =>
-            fetchDevices(ready).pipe(
-              Effect.flatMap(({ devices }) =>
-                devices.find((device) => device.id === deviceId)?.booted === false
-                  ? Effect.logInfo("iOS simulator was already shut down", { deviceId })
-                  : Effect.fail(cause),
+    yield* platform === "desktop"
+      ? Effect.void
+      : platform === "ios"
+        ? postShutdown(`${vendorPrefix("ios")}/grid/api/shutdown`, { udid: deviceId }).pipe(
+            Effect.catch((cause) =>
+              fetchDevices(ready).pipe(
+                Effect.flatMap(({ devices }) =>
+                  devices.find((device) => device.id === deviceId)?.booted === false
+                    ? Effect.logInfo("iOS simulator was already shut down", { deviceId })
+                    : Effect.fail(cause),
+                ),
               ),
             ),
-          ),
-        )
-      : postShutdown("/api/devices/shutdown", { platform, id: deviceId });
+          )
+        : postShutdown("/api/devices/shutdown", { platform, id: deviceId });
     yield* publish((state) => ({
       ...state,
       devices: state.devices.map((device) =>
@@ -839,7 +885,21 @@ export const makeWithHosts = Effect.fn("DeviceService.makeWithHosts")(function* 
   const screenshot: DeviceService["Service"]["screenshot"] = Effect.fn("DeviceService.screenshot")(
     function* (input) {
       const { ready, device } = yield* resolveDevice(input.hostId, input.deviceId);
-      const url = `${ready.hub.origin}${vendorPrefix(device.platform)}/api/screenshot?device=${encodeURIComponent(device.id)}`;
+      if (device.platform === "desktop" && Option.isSome(desktopStreamer)) {
+        const png = yield* desktopStreamer.value.screenshot(device.id).pipe(
+          Effect.mapError(
+            (cause) =>
+              new DeviceOperationError({
+                operation: "screenshot",
+                reason: "request_failed",
+                cause,
+              }),
+          ),
+        );
+        return { device, png };
+      }
+      const origin = yield* hubOrigin(ready, "screenshot");
+      const url = `${origin}${vendorPrefix(device.platform)}/api/screenshot?device=${encodeURIComponent(device.id)}`;
       const png = yield* httpClient.execute(HttpClientRequest.post(url)).pipe(
         Effect.flatMap(HttpClientResponse.filterStatusOk),
         Effect.flatMap((response) => response.arrayBuffer),

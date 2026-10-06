@@ -69,6 +69,7 @@ import * as McpSessionRegistry from "./mcp/McpSessionRegistry.ts";
 import * as PreviewAutomationBroker from "./mcp/PreviewAutomationBroker.ts";
 import * as DeviceService from "./device/DeviceService.ts";
 import { deviceHubProxyRouteLayer } from "./device/DeviceHubProxy.ts";
+import * as DesktopStreamer from "./device/DesktopStreamer.ts";
 import * as PreviewManager from "./preview/Manager.ts";
 import * as PortScanner from "./preview/PortScanner.ts";
 import * as ProcessRunner from "./processRunner.ts";
@@ -416,10 +417,13 @@ const PreviewLayerLive = Layer.empty.pipe(
   Layer.provideMerge(PortScannerLayerLive),
 );
 
+const DesktopStreamerLayerLive = DesktopStreamer.layer.pipe(Layer.provide(ProcessRunner.layer));
+
 const DeviceLayerLive = DeviceService.layer.pipe(
   Layer.provide(ServerSettingsLayerLive),
   Layer.provide(ProcessRunner.layer),
   Layer.provide(NetService.layer),
+  Layer.provideMerge(DesktopStreamerLayerLive),
 );
 
 const WorkspaceEntriesLayerLive = WorkspaceEntries.layer.pipe(Layer.provide(WorkspacePaths.layer));

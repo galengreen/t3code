@@ -53,7 +53,11 @@ export interface AgentDeviceEndpoint {
 
 export interface DeviceHostReady {
   readonly nodePath: string;
-  readonly hub: DeviceHubEndpoint;
+  /**
+   * Null when the host can run neither simulators nor emulators, so the hub
+   * was never installed or started. Desktops do not use the hub.
+   */
+  readonly hub: DeviceHubEndpoint | null;
   /**
    * Runs a host command (`xcrun`, `adb`, or a helper bundled with the hub)
    * where the devices live. On the local host this is a plain spawn; a

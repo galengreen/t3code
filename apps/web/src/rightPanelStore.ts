@@ -8,7 +8,12 @@
  * workspace paths, and diff/files remain singleton surfaces.
  */
 import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environment";
-import { EnvironmentId, ThreadId, type ScopedThreadRef } from "@t3tools/contracts";
+import {
+  type DevicePlatform,
+  EnvironmentId,
+  ThreadId,
+  type ScopedThreadRef,
+} from "@t3tools/contracts";
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 
@@ -31,7 +36,7 @@ export type RightPanelKind = (typeof RIGHT_PANEL_KINDS)[number];
 export interface DeviceTabTarget {
   hostId: string;
   deviceId: string;
-  platform: "ios" | "android";
+  platform: DevicePlatform;
   name: string;
 }
 

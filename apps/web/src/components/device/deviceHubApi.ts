@@ -45,7 +45,13 @@ interface Target {
 }
 
 const vendorBase = (target: Target) =>
-  `${target.access.httpBase}${target.platform === "ios" ? "/vendor/serve-sim" : "/vendor/serve-emu"}`;
+  `${target.access.httpBase}${
+    target.platform === "ios"
+      ? "/vendor/serve-sim"
+      : target.platform === "desktop"
+        ? "/vendor/serve-desktop"
+        : "/vendor/serve-emu"
+  }`;
 
 const hubUrl = (target: Target, path: string, params?: Record<string, string>) => {
   const search = params ? `?${new URLSearchParams(params).toString()}` : "";
@@ -110,6 +116,8 @@ export async function fetchDeviceAxTree(
   target: Target,
   signal?: AbortSignal,
 ): Promise<DeviceAxTree> {
+  // Desktops expose no accessibility tree through the stream.
+  if (target.platform === "desktop") return { elements: [], errors: [] };
   if (target.platform === "ios") {
     const payload = await fetchJson(
       target,

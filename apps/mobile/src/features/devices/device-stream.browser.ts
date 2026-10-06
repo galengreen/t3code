@@ -51,7 +51,11 @@ export function start(configuration: DeviceStreamConfiguration) {
   frame.setAttribute("role", "application");
   frame.setAttribute(
     "aria-label",
-    platform === "ios" ? "iOS Simulator screen" : "Android Emulator screen",
+    platform === "ios"
+      ? "iOS Simulator screen"
+      : platform === "desktop"
+        ? "Desktop screen"
+        : "Android Emulator screen",
   );
   frame.tabIndex = 0;
   Object.assign(frame.style, {

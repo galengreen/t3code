@@ -10,6 +10,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import { HttpClient, HttpClientResponse, HttpRouter } from "effect/http";
 import * as EnvironmentAuth from "../auth/EnvironmentAuth.ts";
+import * as DesktopStreamer from "./DesktopStreamer.ts";
 import * as DeviceService from "./DeviceService.ts";
 import { deviceHubProxyRouteLayer } from "./DeviceHubProxy.ts";
 
@@ -22,6 +23,7 @@ const fixture = (
   scopes: ReadonlyArray<AuthEnvironmentScope>,
   fail = false,
   authError?: EnvironmentAuth.ServerAuthCredentialError | EnvironmentAuth.ServerAuthInternalError,
+  streamer?: Partial<DesktopStreamer.DesktopStreamer["Service"]>,
 ) => {
   let finalized = 0;
   const requests: string[] = [];
@@ -57,6 +59,14 @@ const fixture = (
         } as DeviceService.DeviceService["Service"]),
       ),
       Layer.provideMerge(Layer.succeed(HttpClient.HttpClient, client)),
+      streamer === undefined
+        ? (self) => self
+        : Layer.provideMerge(
+            Layer.succeed(
+              DesktopStreamer.DesktopStreamer,
+              streamer as DesktopStreamer.DesktopStreamer["Service"],
+            ),
+          ),
     ),
     { disableLogger: true },
   );
@@ -185,3 +195,45 @@ it.each(["/panel/2/stream.avcc", "/panel/1/webrtc/offer", "/panel/3/exec"])(
     expect(requests).toEqual([]);
   },
 );
+
+describe("desktop routes", () => {
+  it("serves desktop screenshots in-process instead of forwarding to the hub", async () => {
+    const captured: string[] = [];
+    const { handler, requests } = fixture([AuthOrchestrationReadScope], false, undefined, {
+      screenshot: (display) => {
+        captured.push(display);
+        return Effect.succeed(Uint8Array.from([0x89, 0x50]));
+      },
+    });
+    const response = await handler(
+      new Request("http://t3.test/api/device-hub/vendor/serve-desktop/api/screenshot?device=%3A1", {
+        method: "POST",
+      }),
+    );
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toContain("image/png");
+    expect(new Uint8Array(await response.arrayBuffer())).toEqual(Uint8Array.from([0x89, 0x50]));
+    expect(captured).toEqual([":1"]);
+    expect(requests).toEqual([]);
+  });
+
+  it("answers 503 when the server has no desktop streamer", async () => {
+    const { handler, requests } = fixture([AuthOrchestrationReadScope]);
+    const response = await handler(
+      new Request("http://t3.test/api/device-hub/vendor/serve-desktop/api/screenshot?device=%3A1", {
+        method: "POST",
+      }),
+    );
+    expect(response.status).toBe(503);
+    expect(requests).toEqual([]);
+  });
+
+  it("rejects desktop routes the panel does not use", async () => {
+    const { handler, requests } = fixture([AuthOrchestrationReadScope], false, undefined, {});
+    const response = await handler(
+      new Request("http://t3.test/api/device-hub/vendor/serve-desktop/api/devices"),
+    );
+    expect(response.status).toBe(404);
+    expect(requests).toEqual([]);
+  });
+});

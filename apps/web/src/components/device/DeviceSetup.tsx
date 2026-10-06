@@ -1,5 +1,10 @@
 import { DeviceHostUpdates } from "./DeviceHostUpdates";
-import type { DevicePlatform, DeviceServiceState, EnvironmentId } from "@t3tools/contracts";
+import {
+  DEVICE_PLATFORM_NAMES,
+  type DevicePlatform,
+  type DeviceServiceState,
+  type EnvironmentId,
+} from "@t3tools/contracts";
 import { Check } from "lucide-react";
 import { Check as CheckGlyph, CircleAlert } from "lucide";
 import { useState } from "react";
@@ -14,7 +19,7 @@ import { deviceEnvironment } from "~/state/device";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { cn } from "~/lib/utils";
 
-const platformName = (platform: DevicePlatform) => (platform === "ios" ? "iOS" : "Android");
+const platformName = (platform: DevicePlatform) => DEVICE_PLATFORM_NAMES[platform];
 
 export const deviceHubDescription =
   "Enable this environment to open simulators and emulators, whether they run here or on a remote device host.";
@@ -40,7 +45,9 @@ export function platformSetupStatus(state: DeviceServiceState, platform: DeviceP
       message:
         platform === "ios"
           ? "Xcode is installed, but no iOS Simulator is available. Install a runtime in Xcode Settings → Components."
-          : "The Android SDK is installed, but no virtual device exists. Create one in Android Studio → Device Manager.",
+          : platform === "desktop"
+            ? "ffmpeg and xdotool are installed, but no X display is running on the server."
+            : "The Android SDK is installed, but no virtual device exists. Create one in Android Studio → Device Manager.",
     };
   }
   return {
@@ -48,7 +55,9 @@ export function platformSetupStatus(state: DeviceServiceState, platform: DeviceP
     message:
       platform === "ios"
         ? "Xcode and iOS Simulator are available."
-        : "The Android SDK and Emulator are available.",
+        : platform === "desktop"
+          ? "Desktop streaming is available."
+          : "The Android SDK and Emulator are available.",
   };
 }
 
@@ -236,8 +245,9 @@ function DevicePlatformSetup(props: {
     <div className="space-y-3">
       <PlatformStatus platform="iOS" status={platformSetupStatus(props.state, "ios")} />
       <PlatformStatus platform="Android" status={platformSetupStatus(props.state, "android")} />
+      <PlatformStatus platform="Desktop" status={platformSetupStatus(props.state, "desktop")} />
       <p className="text-xs text-muted-foreground">
-        You can use either platform. Fixing a missing platform does not block the other one.
+        You can use any available platform. Fixing a missing platform does not block the others.
       </p>
       <Button size="compact" variant="outline" disabled={props.disabled} onClick={props.onCheck}>
         {props.checking ? <Spinner size="xs" /> : null}

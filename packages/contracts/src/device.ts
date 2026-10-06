@@ -16,8 +16,21 @@ import { Schema } from "effect";
 
 import { ThreadId, TrimmedNonEmptyString } from "./baseSchemas.ts";
 
-export const DevicePlatform = Schema.Literals(["ios", "android"]);
+/**
+ * `desktop` is a streamed X display on a Linux host (for example a
+ * container's virtual desktop), served by the environment server itself rather than the hub.
+ */
+export const DevicePlatform = Schema.Literals(["ios", "android", "desktop"]);
 export type DevicePlatform = typeof DevicePlatform.Type;
+
+export const DEVICE_PLATFORMS: ReadonlyArray<DevicePlatform> = ["ios", "android", "desktop"];
+
+/** Short platform names for labels; the device kind ("Simulator", "Display") is added by callers. */
+export const DEVICE_PLATFORM_NAMES: Readonly<Record<DevicePlatform, string>> = {
+  ios: "iOS",
+  android: "Android",
+  desktop: "Desktop",
+};
 
 export const DeviceHostId = TrimmedNonEmptyString.check(Schema.isMaxLength(128));
 export type DeviceHostId = typeof DeviceHostId.Type;
@@ -483,12 +496,12 @@ export const DeviceToolOpenInput = Schema.Struct({
   deviceId: Schema.optional(
     DeviceId.annotate({
       description:
-        "Simulator udid or emulator serial from device_list. Omit to use the booted device for the platform, or the most recently used one.",
+        "Simulator udid, emulator serial, or desktop display from device_list. Omit to use the booted device for the platform, or the most recently used one.",
     }),
   ),
   platform: Schema.optional(
     DevicePlatform.annotate({
-      description: "Required when deviceId is omitted and both platforms are available.",
+      description: "Required when deviceId is omitted and more than one platform is available.",
     }),
   ),
   hostId: Schema.optional(

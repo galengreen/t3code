@@ -14,6 +14,7 @@ import { DeviceAndroidFoldControls } from "./DeviceAndroidFoldControls";
 import type { DuoControlState } from "@t3tools/client-runtime/device/duo-control";
 import { DevicePhoneViewport } from "./DevicePhoneViewport";
 import { DeviceLoadingView } from "./DeviceLoadingView";
+import { useDesktopPointer } from "./useDesktopPointer";
 import { type DeviceAxElement, fetchDeviceAxTree } from "./deviceHubApi";
 import {
   createDeviceStreamClient,
@@ -176,7 +177,9 @@ export function DeviceStreamView(props: {
 
   // Displayed aspect ratio (width / height) of the device as the user sees it.
   const aspect = useMemo(() => {
-    if (!screen) return props.platform === "ios" ? 9 / 19.5 : 9 / 20;
+    if (!screen) {
+      return props.platform === "ios" ? 9 / 19.5 : props.platform === "desktop" ? 16 / 10 : 9 / 20;
+    }
     const landscape =
       screen.orientation === "landscape_left" || screen.orientation === "landscape_right";
     const w = landscape
@@ -300,6 +303,8 @@ export function DeviceStreamView(props: {
   }, [access, props.axOverlay, props.deviceId, props.platform, props.visible]);
 
   const pointerActive = useRef(false);
+  const desktop = props.platform === "desktop";
+  const desktopPointer = useDesktopPointer(clientRef);
   const normalizedPoint = (event: React.PointerEvent<HTMLElement>) => {
     const rect = event.currentTarget.getBoundingClientRect();
     const x = (event.clientX - rect.left) / rect.width;
@@ -395,7 +400,7 @@ export function DeviceStreamView(props: {
         )}
         tabIndex={0}
         role="application"
-        aria-label={`${props.platform === "ios" ? "iOS Simulator" : "Android Emulator"} screen`}
+        aria-label={`${props.platform === "ios" ? "iOS Simulator" : props.platform === "desktop" ? "Desktop" : "Android Emulator"} screen`}
         onKeyDown={(event) => {
           if (event.target !== event.currentTarget) return;
           if (event.metaKey && !["r", "R"].includes(event.key)) return;
@@ -408,9 +413,17 @@ export function DeviceStreamView(props: {
         }}
       >
         <div
-          className={cn("relative select-none", showPhone && "invisible pointer-events-none")}
+          className={cn(
+            "relative select-none",
+            desktop && "cursor-default",
+            showPhone && "invisible pointer-events-none",
+          )}
           style={{ width: frame.width, height: frame.height }}
+          {...(desktop
+            ? { onContextMenu: desktopPointer.onContextMenu, onWheel: desktopPointer.onWheel }
+            : {})}
           onPointerDown={(event) => {
+            if (desktop) return desktopPointer.onPointerDown(event);
             event.currentTarget.setPointerCapture(event.pointerId);
             (event.currentTarget.parentElement as HTMLElement | null)?.focus();
             pointerActive.current = true;
@@ -418,11 +431,13 @@ export function DeviceStreamView(props: {
             clientRef.current?.sendTouch("begin", x, y);
           }}
           onPointerMove={(event) => {
+            if (desktop) return desktopPointer.onPointerMove(event);
             if (!pointerActive.current) return;
             const { x, y } = normalizedPoint(event);
             clientRef.current?.sendTouch("move", x, y);
           }}
           onPointerUp={(event) => {
+            if (desktop) return desktopPointer.onPointerUp(event);
             if (!pointerActive.current) return;
             pointerActive.current = false;
             const { x, y } = normalizedPoint(event);

@@ -145,6 +145,7 @@ function DevicePreviewScreen({
     }
   };
 
+  const desktop = preview?.session.platform === "desktop";
   const controls: ScreenHeaderMenuItem[] = [
     ...(state.data?.hosts
       .filter(
@@ -240,7 +241,10 @@ function DevicePreviewScreen({
       disabled: !preview || shuttingDown,
       onPress: () => void shutDownDevice(),
     },
-  ];
+  ].filter(
+    // A desktop has no app switcher or power control.
+    (item) => !(desktop && (item.id === "app-switcher" || item.id === "shutdown")),
+  );
   const pressHome = () => streamRef.current?.home();
   const menuItems: ScreenHeaderMenuItem[] = [
     ...(previews.length > 1
@@ -316,12 +320,14 @@ function DevicePreviewScreen({
               <AppText numberOfLines={1} className="flex-1 text-center font-t3-medium text-base">
                 {preview?.name ?? "Devices"}
               </AppText>
-              <ControlPill
-                accessibilityLabel="Home"
-                icon="house"
-                disabled={!inputConnected}
-                onPress={pressHome}
-              />
+              {desktop ? null : (
+                <ControlPill
+                  accessibilityLabel="Home"
+                  icon="house"
+                  disabled={!inputConnected}
+                  onPress={pressHome}
+                />
+              )}
               <DeviceOptionsMenu items={menuItems} />
             </GlassSurface>
           </View>

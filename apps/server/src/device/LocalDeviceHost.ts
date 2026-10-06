@@ -107,6 +107,12 @@ const platformReason = Effect.fn("LocalDeviceHost.platformReason")(function* (
   platform: DevicePlatform,
 ): Effect.fn.Return<string | null, never, FileSystem.FileSystem | Path.Path> {
   const hostPlatform = yield* HostProcessPlatform;
+  if (platform === "desktop") {
+    if (hostPlatform !== "linux") return "Desktop streaming needs a Linux host with an X display.";
+    if (!(yield* isCommandAvailable("ffmpeg"))) return "ffmpeg was not found on PATH.";
+    if (!(yield* isCommandAvailable("xdotool"))) return "xdotool was not found on PATH.";
+    return null;
+  }
   if (platform === "ios") {
     if (hostPlatform !== "darwin") return "iOS Simulators need macOS with Xcode.";
     if (!(yield* isCommandAvailable("xcrun"))) return "Xcode command line tools were not found.";
@@ -254,7 +260,11 @@ export const make = Effect.fn("LocalDeviceHost.make")(function* () {
 
   const summary: Effect.Effect<DeviceHostSummary> = Effect.gen(function* () {
     const [platforms, hubInstalled, agentDeviceInstalled] = yield* Effect.all([
-      Effect.all([platformAvailability("ios"), platformAvailability("android")]),
+      Effect.all([
+        platformAvailability("ios"),
+        platformAvailability("android"),
+        platformAvailability("desktop"),
+      ]),
       isDeviceHubInstalled(config.baseDir).pipe(
         Effect.provideService(FileSystem.FileSystem, fs),
         Effect.provideService(Path.Path, path),
@@ -641,8 +651,33 @@ export const make = Effect.fn("LocalDeviceHost.make")(function* () {
     return next;
   });
 
+  /** The hub only serves simulators and emulators; a desktop-only host never installs it. */
+  const needsHub = Effect.all([platformAvailability("ios"), platformAvailability("android")]).pipe(
+    Effect.map((platforms) => platforms.some((platform) => platform.available)),
+  );
+
   const ensureReady: DeviceHost.DeviceHost["Service"]["ensureReady"] = (onPhase) =>
-    startLock.withPermits(1)(ensureHubReady(onPhase).pipe(Effect.map(toReady)));
+    startLock.withPermits(1)(
+      Effect.gen(function* () {
+        if (!(yield* needsHub)) {
+          const nodePath = yield* resolveNodeExecutable(
+            "Local device support",
+            hostEnvironment,
+          ).pipe(
+            Effect.provideService(FileSystem.FileSystem, fs),
+            Effect.provideService(Path.Path, path),
+            Effect.provideService(HostProcessPlatform, hostPlatform),
+          );
+          return {
+            hub: null,
+            nodePath,
+            run,
+            helpers: { serveSimAxSettings: null, serveSimCli: null },
+          } satisfies DeviceHost.DeviceHostReady;
+        }
+        return toReady(yield* ensureHubReady(onPhase));
+      }),
+    );
 
   const ensureAgentReady: DeviceHost.DeviceHost["Service"]["ensureAgentReady"] = (onPhase) =>
     startLock.withPermits(1)(
