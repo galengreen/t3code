@@ -75,6 +75,9 @@ import {
 } from "../WorkspaceBreadcrumb";
 import { WorkspacePageContainer } from "../WorkspacePageContainer";
 import { WorkspacePageHeader } from "../WorkspacePageHeader";
+import { refreshCubeUsage, useHasCubeHosts } from "../../state/cubeUsage";
+import { cubeUsageWindow } from "./cubeUsage";
+import { CubeUsageSection } from "./CubeUsageSection";
 import { UsageLimitsSection } from "./UsageLimits";
 import { UsagePriceOverrides } from "./UsagePriceOverrides";
 import { UsageProviderChart } from "./UsageProviderChart";
@@ -131,6 +134,13 @@ export function UsagePage() {
   }));
   const metric = preferences.metric;
   const showingLimits = metric === "limits";
+  const showingCubes = metric === "cubes";
+  // The view is offered once an environment hosts cubes; a saved choice
+  // stays visible while environments are still connecting.
+  const hasCubeHosts = useHasCubeHosts();
+  const metricOptions = METRIC_OPTIONS.filter(
+    (option) => option.value !== "cubes" || hasCubeHosts || showingCubes,
+  );
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [limitsNow, setLimitsNow] = useState(() => Date.now());
   const refreshingRef = useRef(false);
@@ -262,6 +272,7 @@ export function UsagePage() {
     const metricOption = METRIC_OPTIONS.find((option) => option.command === command);
     const periodOption = WINDOW_OPTIONS.find((option) => option.command === command);
     if (!metricOption && !periodOption) return;
+    if (metricOption?.value === "cubes" && !hasCubeHosts) return;
 
     event.preventDefault();
     event.stopPropagation();
@@ -287,6 +298,11 @@ export function UsagePage() {
       return;
     }
     const nextWindow = makeWindow(windowDays, undefined, isPast24Hours ? "hour" : "day");
+    if (showingCubes) {
+      setWindowSelection({ days: windowDays, window: nextWindow });
+      refreshCubeUsage(cubeUsageWindow(nextWindow), selectedEnvironmentIds);
+      return;
+    }
     if (
       nextWindow.sinceDay !== window.sinceDay ||
       nextWindow.untilDay !== window.untilDay ||
@@ -336,7 +352,7 @@ export function UsagePage() {
             selectedEnvironments={selectedEnvironments}
             selectedEnvironmentIds={selectedEnvironmentIds}
             onSelectionChange={setSelectedEnvironmentIds}
-            showUsageStatus={!showingLimits}
+            showUsageStatus={!showingLimits && !showingCubes}
             isPartial={isPartial}
             duplicateSources={merged.duplicateSources}
             contractMismatches={merged.contractMismatches}
@@ -359,7 +375,7 @@ export function UsagePage() {
             if (isUsageMetric(value)) selectMetric(value);
           }}
         >
-          {METRIC_OPTIONS.map((option) => (
+          {metricOptions.map((option) => (
             <Toggle key={option.value} value={option.value} title={shortcutTitle(option)}>
               {option.label}
             </Toggle>
@@ -412,7 +428,7 @@ export function UsagePage() {
             </SelectValue>
           </SelectTrigger>
           <SelectPopup align="end" alignItemWithTrigger={false}>
-            {METRIC_OPTIONS.map((option) => (
+            {metricOptions.map((option) => (
               <SelectItem key={option.value} value={option.value} title={shortcutTitle(option)}>
                 {option.label}
               </SelectItem>
@@ -490,6 +506,12 @@ export function UsagePage() {
                     />
                   ) : null
                 }
+              />
+            ) : showingCubes ? (
+              <CubeUsageSection
+                window={window}
+                periods={isPast24Hours ? hours : days}
+                selectedEnvironmentIds={selectedEnvironmentIds}
               />
             ) : isPending ? (
               <UsageSkeleton />
@@ -619,7 +641,7 @@ export function UsagePage() {
                       daily={merged.daily}
                       hours={hours}
                       hourly={merged.hourly}
-                      metric={metric}
+                      metric={metric === "tokens" ? "tokens" : "cost"}
                       referenceTime={window.untilTime}
                       resolution={isPast24Hours ? "hour" : "day"}
                       timeZone={window.timeZone}
@@ -841,7 +863,7 @@ export function UsagePage() {
           </WorkspacePageContainer>
         </ScrollArea>
       </div>
-      {selectedModel !== undefined && !showingLimits ? (
+      {selectedModel !== undefined && !showingLimits && !showingCubes ? (
         <UsageModelDialog
           model={selectedModel}
           environments={selectedEnvironments}

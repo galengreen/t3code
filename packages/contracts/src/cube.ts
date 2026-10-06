@@ -72,6 +72,44 @@ export const CubeFlyAccount = Schema.Struct({
 });
 export type CubeFlyAccount = typeof CubeFlyAccount.Type;
 
+export const CubeUsageInput = Schema.Struct({
+  /** Inclusive UTC instant. */
+  sinceTime: TrimmedNonEmptyString,
+  /** Exclusive UTC instant. */
+  untilTime: TrimmedNonEmptyString,
+});
+export type CubeUsageInput = typeof CubeUsageInput.Type;
+
+/** Running time the host saw one cube spend in one UTC hour. */
+export const CubeUsageBucket = Schema.Struct({
+  /** Start of the UTC hour, as an ISO instant. */
+  hourStart: Schema.String,
+  cubeId: CubeId,
+  label: Schema.String,
+  backend: Schema.Literals(["docker", "fly"]),
+  runningSeconds: NonNegativeInt,
+  /** Priced when the time was recorded; 0 for cubes on the host's own hardware. */
+  costUsd: Schema.Number,
+});
+export type CubeUsageBucket = typeof CubeUsageBucket.Type;
+
+/**
+ * Where Fly prices come from: Fly's own API when its answer looks right,
+ * else the rates T3 ships with (Fly's published pricing).
+ */
+export const CubeUsagePricing = Schema.Struct({
+  source: Schema.Literals(["fly", "builtIn"]),
+  /** When Fly's API was last asked; null if it never answered. */
+  checkedAt: Schema.NullOr(Schema.String),
+});
+export type CubeUsagePricing = typeof CubeUsagePricing.Type;
+
+export const CubeUsage = Schema.Struct({
+  buckets: Schema.Array(CubeUsageBucket),
+  pricing: CubeUsagePricing,
+});
+export type CubeUsage = typeof CubeUsage.Type;
+
 /**
  * Signing cubes in with Claude: the host runs `claude setup-token` and saves
  * the long-lived token it prints as the cubes' CLAUDE_CODE_OAUTH_TOKEN. The
@@ -145,6 +183,7 @@ export class CubeOperationError extends Schema.TaggedError<CubeOperationError>()
       "claim",
       "clone",
       "home",
+      "usage",
     ]),
     id: Schema.optional(Schema.String),
     cause: Schema.optional(Schema.Defect()),
@@ -155,6 +194,7 @@ export class CubeOperationError extends Schema.TaggedError<CubeOperationError>()
     if (this.operation === "account") return "Could not look up the Fly account.";
     if (this.operation === "clone") return "Could not clone the repository into the cube.";
     if (this.operation === "home") return "Could not set up the cube home on Fly.";
+    if (this.operation === "usage") return "Could not read cube usage.";
     return this.id === undefined
       ? `Could not ${this.operation} cubes.`
       : `Could not ${this.operation} cube ${this.id}.`;

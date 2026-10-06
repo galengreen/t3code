@@ -184,6 +184,7 @@ import * as PreviewAutomationBroker from "./mcp/PreviewAutomationBroker.ts";
 import * as DeviceService from "./device/DeviceService.ts";
 import * as CubeService from "./cube/CubeService.ts";
 import * as CubeClaudeSignIn from "./cube/CubeClaudeSignIn.ts";
+import * as CubeUsage from "./cube/CubeUsage.ts";
 import * as IdleShutdown from "./cube/IdleShutdown.ts";
 import { remoteSshDeviceHosts } from "./device/localSshDeviceHost.ts";
 import * as PreviewManager from "./preview/Manager.ts";
@@ -1229,6 +1230,7 @@ const makeWsRpcLayer = (
       const pullRequestSync = yield* PullRequestSyncReactor.PullRequestSyncReactor;
       const deviceService = yield* DeviceService.DeviceService;
       const cubeService = yield* CubeService.CubeService;
+      const cubeUsage = yield* CubeUsage.CubeUsage;
       const cubeClaudeSignIn = yield* CubeClaudeSignIn.CubeClaudeSignIn;
       const idleShutdown = yield* IdleShutdown.IdleShutdown;
       const deviceHostContext =
@@ -3615,6 +3617,10 @@ const makeWsRpcLayer = (
           }),
         [WS_METHODS.cubeCreateHome]: (_input) =>
           observeRpcEffect(WS_METHODS.cubeCreateHome, cubeService.createHome, {
+            "rpc.aggregate": "cube",
+          }),
+        [WS_METHODS.cubeUsage]: (input) =>
+          observeRpcEffect(WS_METHODS.cubeUsage, cubeUsage.read(input), {
             "rpc.aggregate": "cube",
           }),
         [WS_METHODS.cubeFlyAccount]: (input) =>

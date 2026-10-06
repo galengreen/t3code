@@ -36,7 +36,13 @@ import * as Schema from "effect/Schema";
 import { HttpClient, HttpClientRequest } from "effect/http";
 
 import * as ServerSettings from "../serverSettings.ts";
-import type { CubeDriver, CubeMachine, CubeMachineSpec, CubeOperation } from "./CubeDriver.ts";
+import type {
+  CubeBilling,
+  CubeDriver,
+  CubeMachine,
+  CubeMachineSpec,
+  CubeOperation,
+} from "./CubeDriver.ts";
 
 const API_BASE = "https://api.machines.dev";
 const APP_PREFIX = "t3-cube-";
@@ -76,9 +82,17 @@ const MachineSummary = Schema.Struct({
   created_at: Schema.optional(Schema.String),
   updated_at: Schema.optional(Schema.String),
   app_name: Schema.optional(Schema.String),
+  region: Schema.optional(Schema.String),
   config: Schema.optional(
     Schema.Struct({
       image: Schema.optional(Schema.String),
+      guest: Schema.optional(
+        Schema.Struct({
+          cpu_kind: Schema.optional(Schema.String),
+          cpus: Schema.optional(Schema.Number),
+          memory_mb: Schema.optional(Schema.Number),
+        }),
+      ),
       metadata: Schema.optional(Schema.NullOr(Schema.Record(Schema.String, Schema.String))),
     }),
   ),
@@ -91,6 +105,8 @@ const decodeOrgMachines = Schema.decodeUnknownEffect(
   }),
 );
 const decodeAppMachines = Schema.decodeUnknownEffect(Schema.Array(MachineSummary));
+const MachineEvent = Schema.Struct({ timestamp: Schema.Number, status: Schema.String });
+const decodeMachineEvents = Schema.decodeUnknownEffect(Schema.Array(MachineEvent));
 const decodeMachine = Schema.decodeUnknownEffect(MachineSummary);
 const decodeSecretsVersion = Schema.decodeUnknownEffect(
   Schema.Struct({ version: Schema.optional(Schema.Number) }),
@@ -147,6 +163,18 @@ const toMachine = (app: string, machine: MachineSummary): CubeMachine | null => 
     stoppedAt: state === "stopped" ? (machine.updated_at ?? null) : null,
     httpBaseUrl: `https://${app}.fly.dev`,
     spare: machine.config?.metadata?.[SPARE_METADATA] ?? null,
+    billing: billingOf(machine),
+  };
+};
+
+/** Fly bills by the machine's guest; one made without a full guest is priced as small. */
+const billingOf = (machine: MachineSummary): CubeBilling => {
+  const guest = machine.config?.guest;
+  return {
+    cpuKind: guest?.cpu_kind === "performance" ? "performance" : "shared",
+    cpus: guest?.cpus ?? GUESTS.small.cpus,
+    memoryMb: guest?.memory_mb ?? GUESTS.small.memory_mb,
+    region: machine.region ?? null,
   };
 };
 
@@ -276,7 +304,16 @@ export interface FlyHome {
   readonly httpBaseUrl: string;
 }
 
+/** One change to a machine's state, as Fly records it. */
+export type FlyMachineEvent = typeof MachineEvent.Type;
+
 export interface FlyCubeDriver extends CubeDriver {
+  /**
+   * A cube machine's latest events, at most 50 in any order: when it was
+   * started, suspended, or stopped (`status` is `started`, `suspended`, and
+   * so on), with epoch-millisecond timestamps.
+   */
+  readonly events: (id: CubeId) => Effect.Effect<ReadonlyArray<FlyMachineEvent>, CubeError>;
   /** The organization's cube home, if one was made. */
   readonly findHome: Effect.Effect<FlyHome | null, CubeError>;
   /** Makes and boots a cube home; its server may still be starting when this returns. */
@@ -639,6 +676,22 @@ export const make = Effect.gen(function* () {
   const exec: CubeDriver["exec"] = (id, command, operation) =>
     execIn(appName(id), command, operation, id);
 
+  const events: FlyCubeDriver["events"] = Effect.fn("FlyCubeDriver.events")(function* (id) {
+    const fly = yield* requireConfigured;
+    const machine = yield* machineOf(fly.apiToken, appName(id), "usage", id);
+    return yield* call(
+      fly.apiToken,
+      "GET",
+      // Fly's maximum; listing the machines only carries the last five.
+      `/v1/apps/${appName(id)}/machines/${machine.id}/events?limit=50`,
+      "usage",
+      id,
+    ).pipe(
+      Effect.flatMap((response) => expectOk(response, "usage", id)),
+      Effect.flatMap(decodeOr(decodeMachineEvents)("usage", id)),
+    );
+  });
+
   const homeOf = (app: string): FlyHome => ({ app, httpBaseUrl: `https://${app}.fly.dev` });
 
   const findHome: FlyCubeDriver["findHome"] = Effect.gen(function* () {
@@ -677,6 +730,7 @@ export const make = Effect.gen(function* () {
     remove,
     removeIfStopped,
     exec,
+    events,
     findHome,
     createHome,
     execHome: (home, command) => execIn(home.app, command, "home"),

@@ -112,6 +112,7 @@ const toMachine = (
         : container.State.FinishedAt,
     httpBaseUrl: state === "running" && port ? `http://${urlHost(publishHost)}:${port}` : null,
     spare: container.Name === `/${spareName(id)}` ? (labels[CUBE_SPARE_LABEL] ?? "") : null,
+    billing: null,
   };
 };
 

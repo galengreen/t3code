@@ -6,9 +6,10 @@
  *
  * A driver's own records are the source of truth (container labels and names
  * for Docker, machine metadata for Fly), so the host persists nothing about a
- * cube. That includes spares: cubes booted ahead of time and parked
- * until a create claims one. Every backend's driver is live at once, so cubes made before
- * the user switched backends can still be listed, stopped, and removed.
+ * cube beyond the running time `CubeUsage` records. That includes spares:
+ * cubes booted ahead of time and parked until a create claims one. Every
+ * backend's driver is live at once, so cubes made before the user switched
+ * backends can still be listed, stopped, and removed.
  */
 import type {
   EnvironmentId,
@@ -46,6 +47,16 @@ export interface CubeMachine {
   readonly httpBaseUrl: string | null;
   /** For an unclaimed spare, the settings fingerprint it was made with; null otherwise. */
   readonly spare: string | null;
+  /** What the backend bills running time by; null where it runs on the host's own hardware. */
+  readonly billing: CubeBilling | null;
+}
+
+export interface CubeBilling {
+  readonly cpuKind: "shared" | "performance";
+  readonly cpus: number;
+  readonly memoryMb: number;
+  /** Fly prices some regions higher; null when the backend did not say. */
+  readonly region: string | null;
 }
 
 export interface CubeVariable {
