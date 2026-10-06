@@ -85,6 +85,48 @@ describes the server. Process replacement belongs to the launcher's
 [update protocol](./server-updates.md); the connection runtime handles the
 resulting disconnect.
 
+### Cubes
+
+A host environment can create cubes: machines (Docker containers or Fly
+Machines) that each run their own T3 server, so a paired client sees a complete
+environment. The [cube service](../../apps/server/src/cube/CubeService.ts)
+only creates, wakes, removes, and pairs cubes; it never runs work inside one.
+The backend is the record (Docker labels, Fly app names and machine metadata),
+so there is no cube table to drift.
+
+Fly cubes sleep themselves when their agent is idle
+([`IdleShutdown`](../../apps/server/src/cube/IdleShutdown.ts)), and Fly wakes
+a sleeping machine for any request. So clients must not hold standing
+connections to them: each retry would wake the machine again. A server that
+sleeps this way advertises `wakesOnRequest`, and clients switch its saved
+connection to `connectWhen: "needed"`, connecting on opening a thread, sending,
+or other need rather than in the background. The same holds for the cube home
+below. Docker cubes cannot wake on request and keep ordinary connections.
+
+Only one server may manage cubes on an account. Each manager keeps exactly one
+spare and deletes spares it does not expect, so two managers delete each
+other's. Moving management to the cube home therefore turns cubes off on the
+old host and clears its Fly token before the home takes over.
+
+The cube home is a small Fly machine running the cube image with no projects.
+It sleeps when no client has the app in the foreground and no cube work is
+running, so cubes can be made and managed with every computer of the user's
+off. Its hourly prune and spare checks run by the wall clock, checked every
+minute, because a suspended machine's timers do not count the time it slept.
+Pruning destroys a machine without `force`, which Fly refuses for a started
+one, so a cube woken after the eligibility check is never deleted.
+
+Docker publishes a cube on a new port each time it starts, so clients
+re-resolve their cubes from the host:
+[`syncCubeEnvironments`](../../packages/client-runtime/src/state/cube.ts)
+registers ones it has not seen and moves saved ones to their current port,
+keyed by the cube's environment ID, which survives restarts. A published
+container port also crosses Docker's NAT and the host firewall, which host
+networking does not; a firewall that filters forwarded traffic makes a LAN or
+tailnet publish address unreachable even though the host itself answers there.
+Cubes are off by default because access to the Docker daemon is effectively
+root on the host.
+
 ### Desktop without a local environment
 
 Desktop normally launches its own primary server, but the desktop setting `localEnvironmentEnabled`

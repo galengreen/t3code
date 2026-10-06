@@ -182,6 +182,9 @@ import * as TerminalManager from "./terminal/Manager.ts";
 import { withTerminalOutputWindow } from "./terminal/OutputProtocol.ts";
 import * as PreviewAutomationBroker from "./mcp/PreviewAutomationBroker.ts";
 import * as DeviceService from "./device/DeviceService.ts";
+import * as CubeService from "./cube/CubeService.ts";
+import * as CubeClaudeSignIn from "./cube/CubeClaudeSignIn.ts";
+import * as IdleShutdown from "./cube/IdleShutdown.ts";
 import { remoteSshDeviceHosts } from "./device/localSshDeviceHost.ts";
 import * as PreviewManager from "./preview/Manager.ts";
 import { issueAssetUrl } from "./assets/AssetAccess.ts";
@@ -1225,6 +1228,9 @@ const makeWsRpcLayer = (
       const pullRequests = yield* PullRequestService.PullRequestService;
       const pullRequestSync = yield* PullRequestSyncReactor.PullRequestSyncReactor;
       const deviceService = yield* DeviceService.DeviceService;
+      const cubeService = yield* CubeService.CubeService;
+      const cubeClaudeSignIn = yield* CubeClaudeSignIn.CubeClaudeSignIn;
+      const idleShutdown = yield* IdleShutdown.IdleShutdown;
       const deviceHostContext =
         yield* Effect.context<Effect.Services<ReturnType<typeof remoteSshDeviceHosts>>>();
       const orchestrationEngine = yield* Orchestrator.OrchestratorV2;
@@ -3574,6 +3580,54 @@ const makeWsRpcLayer = (
         [WS_METHODS.deviceAction]: (input) =>
           observeRpcEffect(WS_METHODS.deviceAction, deviceService.action(input), {
             "rpc.aggregate": "device",
+          }),
+        [WS_METHODS.cubeList]: (_input) =>
+          observeRpcEffect(WS_METHODS.cubeList, cubeService.list, {
+            "rpc.aggregate": "cube",
+          }),
+        [WS_METHODS.cubeCreate]: (input) =>
+          observeRpcEffect(WS_METHODS.cubeCreate, cubeService.create(input), {
+            "rpc.aggregate": "cube",
+          }),
+        [WS_METHODS.cubeStart]: (input) =>
+          observeRpcEffect(WS_METHODS.cubeStart, cubeService.start(input), {
+            "rpc.aggregate": "cube",
+          }),
+        [WS_METHODS.cubeStop]: (input) =>
+          observeRpcEffect(WS_METHODS.cubeStop, cubeService.stop(input), {
+            "rpc.aggregate": "cube",
+          }),
+        [WS_METHODS.cubeRemove]: (input) =>
+          observeRpcEffect(WS_METHODS.cubeRemove, cubeService.remove(input), {
+            "rpc.aggregate": "cube",
+          }),
+        [WS_METHODS.cubePair]: (input) =>
+          observeRpcEffect(WS_METHODS.cubePair, cubeService.pair(input), {
+            "rpc.aggregate": "cube",
+          }),
+        [WS_METHODS.cubeRemovedEnvironments]: (_input) =>
+          observeRpcEffect(WS_METHODS.cubeRemovedEnvironments, cubeService.removedEnvironments, {
+            "rpc.aggregate": "cube",
+          }),
+        [WS_METHODS.cubeSleep]: (_input) =>
+          observeRpcEffect(WS_METHODS.cubeSleep, idleShutdown.sleepNow, {
+            "rpc.aggregate": "cube",
+          }),
+        [WS_METHODS.cubeCreateHome]: (_input) =>
+          observeRpcEffect(WS_METHODS.cubeCreateHome, cubeService.createHome, {
+            "rpc.aggregate": "cube",
+          }),
+        [WS_METHODS.cubeFlyAccount]: (input) =>
+          observeRpcEffect(WS_METHODS.cubeFlyAccount, cubeService.flyAccount(input), {
+            "rpc.aggregate": "cube",
+          }),
+        [WS_METHODS.cubeClaudeSignIn]: (_input) =>
+          observeRpcStream(WS_METHODS.cubeClaudeSignIn, cubeClaudeSignIn.run, {
+            "rpc.aggregate": "cube",
+          }),
+        [WS_METHODS.cubeClaudeSignInInput]: (input) =>
+          observeRpcEffect(WS_METHODS.cubeClaudeSignInInput, cubeClaudeSignIn.input(input), {
+            "rpc.aggregate": "cube",
           }),
         [WS_METHODS.subscribeDeviceState]: (_input) =>
           observeRpcStream(

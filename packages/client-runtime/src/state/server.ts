@@ -434,6 +434,25 @@ export const makeEnvironmentServerConfigState = Effect.fn("EnvironmentServerConf
 
     yield* runCachePersistence(persistence, persistPending).pipe(Effect.forkScoped);
 
+    // A server that sleeps until a request wakes it (a cube, a cube home)
+    // is connected only when needed, however it was added: a standing
+    // connection would wake it again each time it slept.
+    const registry = yield* Effect.serviceOption(EnvironmentRegistry.EnvironmentRegistry);
+    if (Option.isSome(registry)) {
+      yield* SubscriptionRef.changes(state).pipe(
+        Stream.filter(
+          (projection) =>
+            Option.isSome(projection) &&
+            projection.value.config.environment.capabilities.wakesOnRequest === true,
+        ),
+        Stream.take(1),
+        Stream.runForEach(() =>
+          registry.value.setConnectWhen(environmentId, "needed").pipe(Effect.ignore),
+        ),
+        Effect.forkScoped,
+      );
+    }
+
     yield* subscribe(WS_METHODS.subscribeServerConfig, {
       ...(subscription.environmentThemes === true ? { environmentThemes: true } : {}),
       ...(subscription.usageLimitSources === true ? { usageLimitSources: true } : {}),

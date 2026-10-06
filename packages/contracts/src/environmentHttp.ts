@@ -43,6 +43,17 @@ import {
   OrchestrationV2ThreadHistoryPage,
 } from "./orchestrationV2.ts";
 import { Project, ProjectMutation, ProjectSnapshot } from "./project.ts";
+import { ServerSettingsPatch } from "./settings.ts";
+import {
+  CubeCreateInput,
+  CubeIdInput,
+  CubeNotFoundError,
+  CubeNotRunningError,
+  CubeOperationError,
+  CubePairing,
+  CubeSummary,
+  CubeUnavailableError,
+} from "./cube.ts";
 import {
   PullRequestDiffInput,
   PullRequestDiffResult,
@@ -110,6 +121,7 @@ export const EnvironmentInternalErrorReason = Schema.Literals([
   "orchestration_thread_snapshot_failed",
   "orchestration_thread_bounded_snapshot_failed",
   "orchestration_thread_history_failed",
+  "settings_update_failed",
   "internal_error",
 ]);
 export type EnvironmentInternalErrorReason = typeof EnvironmentInternalErrorReason.Type;
@@ -580,6 +592,87 @@ class EnvironmentProjectsHttpApi extends HttpApiGroup.make("projects")
     }).middleware(EnvironmentAuthenticatedAuth),
   ) {}
 
+const EnvironmentCubeErrors = [
+  CubeUnavailableError,
+  CubeNotFoundError,
+  CubeNotRunningError,
+  CubeOperationError,
+  EnvironmentScopeRequiredError,
+  EnvironmentInternalError,
+] as const;
+
+/**
+ * The host's cubes, for `t3 cube` commands: they run through the live
+ * server, so its locks and spare are the only ones in play.
+ */
+class EnvironmentCubesHttpApi extends HttpApiGroup.make("cubes")
+  .add(
+    HttpApiEndpoint.get("list", "/api/cubes", {
+      headers: OptionalBearerHeaders,
+      success: Schema.Array(CubeSummary),
+      error: EnvironmentCubeErrors,
+    }).middleware(EnvironmentAuthenticatedAuth),
+  )
+  .add(
+    HttpApiEndpoint.post("create", "/api/cubes/create", {
+      headers: OptionalBearerHeaders,
+      payload: CubeCreateInput,
+      success: CubeSummary,
+      error: EnvironmentCubeErrors,
+    }).middleware(EnvironmentAuthenticatedAuth),
+  )
+  .add(
+    HttpApiEndpoint.post("start", "/api/cubes/start", {
+      headers: OptionalBearerHeaders,
+      payload: CubeIdInput,
+      success: CubeSummary,
+      error: EnvironmentCubeErrors,
+    }).middleware(EnvironmentAuthenticatedAuth),
+  )
+  .add(
+    HttpApiEndpoint.post("stop", "/api/cubes/stop", {
+      headers: OptionalBearerHeaders,
+      payload: CubeIdInput,
+      success: CubeSummary,
+      error: EnvironmentCubeErrors,
+    }).middleware(EnvironmentAuthenticatedAuth),
+  )
+  .add(
+    HttpApiEndpoint.post("remove", "/api/cubes/remove", {
+      headers: OptionalBearerHeaders,
+      payload: CubeIdInput,
+      error: EnvironmentCubeErrors,
+    }).middleware(EnvironmentAuthenticatedAuth),
+  )
+  .add(
+    HttpApiEndpoint.post("pair", "/api/cubes/pair", {
+      headers: OptionalBearerHeaders,
+      payload: CubeIdInput,
+      success: CubePairing,
+      error: EnvironmentCubeErrors,
+    }).middleware(EnvironmentAuthenticatedAuth),
+  )
+  .add(
+    HttpApiEndpoint.post("createHome", "/api/cubes/home", {
+      headers: OptionalBearerHeaders,
+      success: CubePairing,
+      error: EnvironmentCubeErrors,
+    }).middleware(EnvironmentAuthenticatedAuth),
+  ) {}
+
+/**
+ * Changes this server's settings, for another server handing it work, such as
+ * moving cube management to a cube home. Answers without the settings, so
+ * secrets never travel back.
+ */
+class EnvironmentSettingsHttpApi extends HttpApiGroup.make("settings").add(
+  HttpApiEndpoint.post("update", "/api/settings", {
+    headers: OptionalBearerHeaders,
+    payload: ServerSettingsPatch,
+    error: [EnvironmentScopeRequiredError, EnvironmentInternalError],
+  }).middleware(EnvironmentAuthenticatedAuth),
+) {}
+
 /** Large, compressible pull-request payloads travel over HTTP rather than the RPC socket. */
 class EnvironmentPullRequestsHttpApi extends HttpApiGroup.make("pullRequests").add(
   HttpApiEndpoint.post("diff", "/api/pull-requests/diff", {
@@ -687,5 +780,7 @@ export class EnvironmentHttpApi extends HttpApi.make("environment")
   .add(EnvironmentOrchestrationHttpApi)
   .add(EnvironmentPullRequestsHttpApi)
   .add(EnvironmentProjectsHttpApi)
+  .add(EnvironmentCubesHttpApi)
+  .add(EnvironmentSettingsHttpApi)
   .add(EnvironmentConnectHttpApi)
   .add(EnvironmentWebhooksHttpApi) {}

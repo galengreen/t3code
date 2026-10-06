@@ -51,7 +51,7 @@ export function createEnvironmentPresentationAtoms<E>(input: {
         entry,
         connection:
           entry.unsupportedReason === undefined
-            ? presentEnvironmentConnection(state)
+            ? presentEnvironmentConnection(state, entry)
             : { phase: "unsupported", error: entry.unsupportedReason, traceId: null },
         serverConfig: get(input.serverConfigValueAtom(environmentId)),
       } satisfies EnvironmentPresentation;
@@ -86,6 +86,8 @@ export interface EnvironmentConnectionSummary {
   readonly displayUrl: string;
   readonly isRelayManaged: boolean;
   readonly isEnabled: boolean;
+  /** Connects only when needed (a cube): not being connected is its normal, idle state. */
+  readonly connectsWhenNeeded: boolean;
   readonly connectionState: EnvironmentConnectionPhase;
   readonly connectionError: string | null;
   readonly connectionErrorTraceId: string | null;
@@ -101,6 +103,7 @@ export function projectEnvironmentConnectionSummary(
     displayUrl: connectionCatalogDisplayUrl(environment.entry) ?? "",
     isRelayManaged: hasRelayRoute(environment.entry),
     isEnabled: environment.entry.enabled,
+    connectsWhenNeeded: environment.entry.connectWhen === "needed",
     connectionState: environment.connection.phase,
     connectionError: environment.connection.error,
     connectionErrorTraceId: environment.connection.traceId,
@@ -155,6 +158,7 @@ export function createEnvironmentSummaryAtoms(input: {
         previous.displayUrl === next.displayUrl &&
         previous.isRelayManaged === next.isRelayManaged &&
         previous.isEnabled === next.isEnabled &&
+        previous.connectsWhenNeeded === next.connectsWhenNeeded &&
         previous.connectionState === next.connectionState &&
         previous.connectionError === next.connectionError &&
         previous.connectionErrorTraceId === next.connectionErrorTraceId

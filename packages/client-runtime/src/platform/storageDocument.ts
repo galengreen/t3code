@@ -4,6 +4,7 @@ import * as Schema from "effect/Schema";
 
 import {
   type ConnectionRegistration,
+  type ConnectWhen,
   ConnectionCredential,
   ConnectionProfile,
 } from "../connection/catalog.ts";
@@ -30,6 +31,9 @@ export const ConnectionCatalogDocument = Schema.Struct({
   disabledEnvironmentIds: Schema.Array(EnvironmentId).pipe(
     Schema.withDecodingDefaultKey(Effect.succeed([])),
   ),
+  // Saved environments that connect only when needed, because they sleep
+  // when unused (cubes). See `ConnectionCatalogEntry.connectWhen`.
+  onDemandEnvironmentIds: Schema.optionalKey(Schema.Array(EnvironmentId)),
 });
 export type ConnectionCatalogDocument = typeof ConnectionCatalogDocument.Type;
 
@@ -188,6 +192,15 @@ export function removeConnectionFromCatalog(
       (value) => value,
       environmentId,
     ),
+    ...(next.onDemandEnvironmentIds === undefined
+      ? {}
+      : {
+          onDemandEnvironmentIds: removeCatalogValue(
+            next.onDemandEnvironmentIds,
+            (value) => value,
+            environmentId,
+          ),
+        }),
     ...(next.githubRoutingPermissions === undefined
       ? {}
       : {
@@ -213,6 +226,25 @@ export function setConnectionEnabledInCatalog(
   return {
     ...document,
     disabledEnvironmentIds: registered && !enabled ? [...without, environmentId] : without,
+  };
+}
+
+/** Records whether a saved environment connects only when needed; unknown ids are ignored. */
+export function setConnectWhenInCatalog(
+  document: ConnectionCatalogDocument,
+  environmentId: EnvironmentId,
+  connectWhen: ConnectWhen,
+): ConnectionCatalogDocument {
+  const registered = document.targets.some((target) => target.environmentId === environmentId);
+  const without = removeCatalogValue(
+    document.onDemandEnvironmentIds ?? [],
+    (value) => value,
+    environmentId,
+  );
+  return {
+    ...document,
+    onDemandEnvironmentIds:
+      registered && connectWhen === "needed" ? [...without, environmentId] : without,
   };
 }
 

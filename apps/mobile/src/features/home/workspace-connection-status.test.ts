@@ -45,6 +45,7 @@ describe("workspace connection status", () => {
           displayUrl: "",
           isRelayManaged: false,
           isEnabled: true,
+          connectsWhenNeeded: false,
           connectionState: "reconnecting",
           connectionError: null,
           connectionErrorTraceId: null,

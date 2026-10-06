@@ -229,6 +229,8 @@ export function createThreadEnvironmentAtoms<R, E>(
     visit: createEnvironmentCommand(runtime, {
       label: "environment-data:commands:thread:visit",
       execute: (input: VisitThreadInput) => visitThread(input),
+      // Sent whenever a thread is on screen; a sleeping cube must stay asleep.
+      wakesEnvironment: false,
       scheduler,
       concurrency,
     }),

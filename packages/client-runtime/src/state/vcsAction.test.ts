@@ -641,6 +641,9 @@ describe("vcsActionState", () => {
           stream,
         ) => Stream.provideService(stream, EnvironmentSupervisor.EnvironmentSupervisor, supervisor);
         const environmentRegistry = EnvironmentRegistry.EnvironmentRegistry.of({
+          entries: (yield* SubscriptionRef.make(
+            new Map(),
+          )) as unknown as EnvironmentRegistry.EnvironmentRegistry["Service"]["entries"],
           run,
           runStream,
         } as unknown as EnvironmentRegistry.EnvironmentRegistry["Service"]);

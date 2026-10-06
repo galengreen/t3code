@@ -1,4 +1,4 @@
-import type { ContextMenuItem } from "@t3tools/contracts";
+import type { ContextMenuItem, CubeState } from "@t3tools/contracts";
 import type { SnoozePreset } from "@t3tools/client-runtime/state/thread-settled";
 
 /**
@@ -28,7 +28,11 @@ export type ThreadActionMenuId =
   | "copy-branch"
   | "copy-thread-id"
   | "archive"
-  | "delete";
+  | "delete"
+  | "cube"
+  | "cube:start"
+  | "cube:stop"
+  | "cube:delete";
 
 export type DraftActionMenuId =
   | "copy"
@@ -98,7 +102,18 @@ export interface ThreadActionMenuState {
     readonly titleRegeneration: boolean;
   };
   readonly snoozePresets: ReadonlyArray<SnoozePreset>;
+  /**
+   * The machine the thread runs in, when it is a cube. One that wakes on
+   * request (Fly) wakes when its thread is opened, so it offers no Start.
+   */
+  readonly cube?: { readonly state: CubeState; readonly wakesOnRequest: boolean } | null;
 }
+
+const CUBE_STATE_LABELS: Record<CubeState, string> = {
+  running: "running",
+  stopped: "stopped",
+  failed: "failed",
+};
 
 /**
  * Single source for the per-thread action menu: the sidebar row's right-click
@@ -216,6 +231,38 @@ export function buildThreadActionMenuItems(
       ],
     },
     { id: "project-settings", label: "Project settings", icon: "settings" },
+    // The thread's machine: waking it, putting it to sleep to stop billing,
+    // and deleting it with its files once the work has shipped.
+    ...(state.cube
+      ? [
+          {
+            id: "cube" as const,
+            label: `Cube (${
+              state.cube.wakesOnRequest && state.cube.state === "stopped"
+                ? "asleep"
+                : CUBE_STATE_LABELS[state.cube.state]
+            })`,
+            icon: "box",
+            children: [
+              ...(state.cube.wakesOnRequest
+                ? state.cube.state === "running"
+                  ? [{ id: "cube:stop" as const, label: "Put to sleep" }]
+                  : []
+                : [
+                    state.cube.state === "running"
+                      ? { id: "cube:stop" as const, label: "Stop cube" }
+                      : { id: "cube:start" as const, label: "Start cube" },
+                  ]),
+              {
+                id: "cube:delete" as const,
+                label: "Delete cube…",
+                destructive: true,
+                separatorBefore: !(state.cube.wakesOnRequest && state.cube.state !== "running"),
+              },
+            ],
+          },
+        ]
+      : []),
     // Archive removes the thread from the sidebar while keeping its
     // conversation under Settings > Archived threads — distinct from Settle
     // (stays visible in the Settled shelf) and Delete (clears history for

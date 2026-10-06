@@ -11,6 +11,7 @@ import {
   removeCatalogValue,
   removeConnectionFromCatalog,
   setConnectionEnabledInCatalog,
+  setConnectWhenInCatalog,
   setRoutesInCatalog,
   replaceCatalogValue,
   Persistence,
@@ -86,10 +87,12 @@ function persistenceError(
   operation:
     | "list-targets"
     | "list-disabled-targets"
+    | "list-on-demand-targets"
     | "register-connection"
     | "set-connection-routes"
     | "remove-connection"
     | "set-connection-enabled"
+    | "set-connection-policy"
     | "load-shell"
     | "save-shell"
     | "load-thread"
@@ -474,6 +477,10 @@ export const connectionStorageLayer = Layer.effectContext(
         Effect.map((document) => document.disabledEnvironmentIds),
         Effect.mapError((cause) => persistenceError("list-disabled-targets", cause)),
       ),
+      listOnDemand: catalog.read.pipe(
+        Effect.map((document) => document.onDemandEnvironmentIds ?? []),
+        Effect.mapError((cause) => persistenceError("list-on-demand-targets", cause)),
+      ),
     });
     const registrationStore = Persistence.ConnectionRegistrationStore.of({
       register: (registration, routes) =>
@@ -492,6 +499,10 @@ export const connectionStorageLayer = Layer.effectContext(
         catalog
           .update((document) => setConnectionEnabledInCatalog(document, environmentId, enabled))
           .pipe(Effect.mapError((cause) => persistenceError("set-connection-enabled", cause))),
+      setConnectWhen: (environmentId, connectWhen) =>
+        catalog
+          .update((document) => setConnectWhenInCatalog(document, environmentId, connectWhen))
+          .pipe(Effect.mapError((cause) => persistenceError("set-connection-policy", cause))),
     });
     const profileStore = ProfileStore.make({
       get: (connectionId) =>

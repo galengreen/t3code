@@ -70,6 +70,9 @@ import * as PreviewAutomationBroker from "./mcp/PreviewAutomationBroker.ts";
 import * as DeviceService from "./device/DeviceService.ts";
 import { deviceHubProxyRouteLayer } from "./device/DeviceHubProxy.ts";
 import * as DesktopStreamer from "./device/DesktopStreamer.ts";
+import * as CubeDrivers from "./cube/CubeDrivers.ts";
+import * as IdleShutdown from "./cube/IdleShutdown.ts";
+import * as CubeService from "./cube/CubeService.ts";
 import * as PreviewManager from "./preview/Manager.ts";
 import * as PortScanner from "./preview/PortScanner.ts";
 import * as ProcessRunner from "./processRunner.ts";
@@ -186,6 +189,9 @@ import {
 } from "./serverRuntimeState.ts";
 import { orchestrationHttpApiLayer } from "./orchestration-v2/http.ts";
 import { projectHttpApiLayer } from "./project/http.ts";
+import { cubeHttpApiLayer } from "./cube/http.ts";
+import { serverSettingsHttpApiLayer } from "./serverSettingsHttp.ts";
+import * as CubeClaudeSignIn from "./cube/CubeClaudeSignIn.ts";
 import * as NetService from "@t3tools/shared/Net";
 import * as RelayClient from "@t3tools/shared/relayClient";
 import { disableTailscaleServe, ensureTailscaleServe } from "@t3tools/tailscale";
@@ -419,6 +425,15 @@ const PreviewLayerLive = Layer.empty.pipe(
 
 const DesktopStreamerLayerLive = DesktopStreamer.layer.pipe(Layer.provide(ProcessRunner.layer));
 
+const CubeLayerLive = Layer.mergeAll(
+  CubeService.layer,
+  CubeClaudeSignIn.layer.pipe(Layer.provide(PtyAdapterLive)),
+).pipe(
+  Layer.provide(CubeDrivers.layer),
+  Layer.provide(ServerSettingsLayerLive),
+  Layer.provide(ProcessRunner.layer),
+);
+
 const DeviceLayerLive = DeviceService.layer.pipe(
   Layer.provide(ServerSettingsLayerLive),
   Layer.provide(ProcessRunner.layer),
@@ -595,7 +610,9 @@ const RuntimeCoreDependenciesBaseLive = Layer.mergeAll(
   Layer.provideMerge(Layer.mergeAll(SourceControlProviderRegistryLayerLive, GitHubCli.layer)),
   Layer.provideMerge(GitLayerLive),
   Layer.provideMerge(VcsLayerLive),
-  Layer.provideMerge(Layer.mergeAll(TerminalLayerLive, PreviewLayerLive, DeviceLayerLive)),
+  Layer.provideMerge(
+    Layer.mergeAll(TerminalLayerLive, PreviewLayerLive, DeviceLayerLive, CubeLayerLive),
+  ),
   Layer.provideMerge(PersistenceLayerLive),
   // Both read a user-owned file out of the state directory and stream changes
   // to clients; neither depends on the other.
@@ -689,6 +706,8 @@ const makeRoutesLayer = Layer.mergeAll(
       Layer.provide(orchestrationHttpApiLayer),
       Layer.provide(pullRequestHttpApiLayer),
       Layer.provide(projectHttpApiLayer),
+      Layer.provide(cubeHttpApiLayer),
+      Layer.provide(serverSettingsHttpApiLayer),
       Layer.provide(serverEnvironmentHttpApiLayer),
       Layer.provide(webhookHttpApiLayer.pipe(Layer.provide(RelayDeliveryProof.layer))),
       Layer.provide(environmentAuthenticatedAuthLayer),
@@ -1069,9 +1088,13 @@ const makeServerLayer = Layer.unwrap(
       tailscaleServeLayer,
       cloudDesiredLinkReconcileLayer,
       HeapSnapshot.layer,
+      CubeService.pruneLayer,
+      CubeService.sparesLayer,
     );
 
     return serverApplicationLayer.pipe(
+      // Routes serve `cube.sleep`, so they need the idle service.
+      Layer.provideMerge(IdleShutdown.layer),
       Layer.provideMerge(runtimeServicesLive),
       Layer.provideMerge(
         McpSessionRegistry.layer.pipe(

@@ -83,6 +83,7 @@ import {
   type ThreadInspectorMode,
 } from "./thread-inspector-content-stack";
 import { threadRouteIsHydrating } from "./thread-route-hydration";
+import { useConnectWhenOpened } from "../../connection/use-connect-when-opened";
 
 function ThreadHeader(
   props: Parameters<typeof useThreadHeaderOptions>[0] & {
@@ -257,6 +258,7 @@ export function ThreadRouteScreen(props: ThreadRouteScreenProps) {
   const threadIdRaw = firstRouteParam(params.threadId);
   const environmentId = environmentIdRaw ? EnvironmentId.make(environmentIdRaw) : null;
   const routeEnvironmentRuntime = useRemoteEnvironmentRuntime(environmentId);
+  useConnectWhenOpened(environmentId);
   const routeEnvironmentShellState = useEnvironmentShellReadiness(environmentId);
   const { onReconnectEnvironment } = useRemoteConnections();
   const navigation = useNavigation();

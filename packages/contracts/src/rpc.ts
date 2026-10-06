@@ -10,7 +10,7 @@ import * as Schema from "effect/Schema";
 import * as Rpc from "effect/rpc/Rpc";
 import * as RpcGroup from "effect/rpc/RpcGroup";
 import * as RpcMiddleware from "effect/rpc/RpcMiddleware";
-import { NonNegativeInt, TrimmedNonEmptyString } from "./baseSchemas.ts";
+import { EnvironmentId, NonNegativeInt, TrimmedNonEmptyString } from "./baseSchemas.ts";
 import {
   CodexAuthCallbackInput,
   CodexAuthCallbackState,
@@ -260,6 +260,17 @@ import {
   DeviceShutdownInput,
 } from "./device.ts";
 import {
+  CubeCreateInput,
+  CubeError,
+  CubeFlyAccount,
+  CubeFlyAccountInput,
+  CubeClaudeSignInInput,
+  CubeClaudeSignInState,
+  CubeIdInput,
+  CubePairing,
+  CubeSummary,
+} from "./cube.ts";
+import {
   PreviewAutomationError,
   PreviewAutomationHost,
   PreviewAutomationHostFocus,
@@ -435,6 +446,20 @@ export const WS_METHODS = {
   deviceShutdown: "device.shutdown",
   deviceDetail: "device.detail",
   deviceAction: "device.action",
+
+  // Cube methods
+  cubeList: "cube.list",
+  cubeCreate: "cube.create",
+  cubeStart: "cube.start",
+  cubeStop: "cube.stop",
+  cubeRemove: "cube.remove",
+  cubePair: "cube.pair",
+  cubeFlyAccount: "cube.flyAccount",
+  cubeRemovedEnvironments: "cube.removedEnvironments",
+  cubeSleep: "cube.sleep",
+  cubeCreateHome: "cube.createHome",
+  cubeClaudeSignIn: "cube.claudeSignIn",
+  cubeClaudeSignInInput: "cube.claudeSignInInput",
 
   // Server meta
   serverProbe: "server.probe",
@@ -1452,6 +1477,83 @@ const WsSubscribeDiscoveredLocalServersRpc = Rpc.make(WS_METHODS.subscribeDiscov
   stream: true,
 });
 
+const WsCubeListRpc = Rpc.make(WS_METHODS.cubeList, {
+  payload: Schema.Struct({}),
+  success: Schema.Array(CubeSummary),
+  error: Schema.Union([CubeError, EnvironmentAuthorizationError]),
+});
+
+const WsCubeCreateRpc = Rpc.make(WS_METHODS.cubeCreate, {
+  payload: CubeCreateInput,
+  success: CubeSummary,
+  error: Schema.Union([CubeError, EnvironmentAuthorizationError]),
+});
+
+const WsCubeStartRpc = Rpc.make(WS_METHODS.cubeStart, {
+  payload: CubeIdInput,
+  success: CubeSummary,
+  error: Schema.Union([CubeError, EnvironmentAuthorizationError]),
+});
+
+const WsCubeStopRpc = Rpc.make(WS_METHODS.cubeStop, {
+  payload: CubeIdInput,
+  success: CubeSummary,
+  error: Schema.Union([CubeError, EnvironmentAuthorizationError]),
+});
+
+const WsCubeRemoveRpc = Rpc.make(WS_METHODS.cubeRemove, {
+  payload: CubeIdInput,
+  error: Schema.Union([CubeError, EnvironmentAuthorizationError]),
+});
+
+const WsCubePairRpc = Rpc.make(WS_METHODS.cubePair, {
+  payload: CubeIdInput,
+  success: CubePairing,
+  error: Schema.Union([CubeError, EnvironmentAuthorizationError]),
+});
+
+// Served by a cube's own server: puts its machine to sleep now, unless its
+// agent is working or its repository is still being prepared. Answers first.
+const WsCubeSleepRpc = Rpc.make(WS_METHODS.cubeSleep, {
+  payload: Schema.Struct({}),
+  error: Schema.Union([CubeError, EnvironmentAuthorizationError]),
+});
+
+// Moves cube management from this server to a cube home on Fly, creating it
+// if there is none, and answers with a pairing for it. This server then stops
+// managing cubes and forgets its Fly token, so the home is the only one that does.
+const WsCubeCreateHomeRpc = Rpc.make(WS_METHODS.cubeCreateHome, {
+  payload: Schema.Struct({}),
+  success: CubePairing,
+  error: Schema.Union([CubeError, EnvironmentAuthorizationError]),
+});
+
+const WsCubeRemovedEnvironmentsRpc = Rpc.make(WS_METHODS.cubeRemovedEnvironments, {
+  payload: Schema.Struct({}),
+  success: Schema.Array(EnvironmentId),
+  error: Schema.Union([CubeError, EnvironmentAuthorizationError]),
+});
+
+// Runs `claude setup-token` on this server, streaming its terminal, and saves
+// the token for new cubes. Ctrl-C through the input RPC cancels it.
+const WsCubeClaudeSignInRpc = Rpc.make(WS_METHODS.cubeClaudeSignIn, {
+  payload: Schema.Struct({}),
+  success: CubeClaudeSignInState,
+  error: Schema.Union([CubeError, EnvironmentAuthorizationError]),
+  stream: true,
+});
+
+const WsCubeClaudeSignInInputRpc = Rpc.make(WS_METHODS.cubeClaudeSignInInput, {
+  payload: CubeClaudeSignInInput,
+  error: Schema.Union([CubeError, EnvironmentAuthorizationError]),
+});
+
+const WsCubeFlyAccountRpc = Rpc.make(WS_METHODS.cubeFlyAccount, {
+  payload: CubeFlyAccountInput,
+  success: CubeFlyAccount,
+  error: Schema.Union([CubeError, EnvironmentAuthorizationError]),
+});
+
 const WsDeviceTestHostRpc = Rpc.make(WS_METHODS.deviceTestHost, {
   payload: SshDeviceHostConfig,
   success: DeviceHostSummary,
@@ -1903,6 +2005,18 @@ export const WsRpcGroup = RpcGroup.make(
   WsDeviceDetailRpc,
   WsDeviceActionRpc,
   WsSubscribeDeviceStateRpc,
+  WsCubeListRpc,
+  WsCubeCreateRpc,
+  WsCubeStartRpc,
+  WsCubeStopRpc,
+  WsCubeRemoveRpc,
+  WsCubeFlyAccountRpc,
+  WsCubeRemovedEnvironmentsRpc,
+  WsCubeClaudeSignInRpc,
+  WsCubeClaudeSignInInputRpc,
+  WsCubeSleepRpc,
+  WsCubeCreateHomeRpc,
+  WsCubePairRpc,
   WsSubscribeServerConfigRpc,
   WsSubscribeServerLifecycleRpc,
   WsSubscribeAuthAccessRpc,

@@ -18,6 +18,7 @@ import {
   BearerConnectionRegistration,
   type ConnectionCatalogEntry,
   type ConnectionCredential,
+  type ConnectWhen,
   SshConnectionProfile,
   SshConnectionRegistration,
 } from "./catalog.ts";
@@ -38,6 +39,8 @@ export interface PairingConnectionInput {
   readonly pairingUrl?: string;
   readonly host?: string;
   readonly pairingCode?: string;
+  /** See `ConnectWhen`; cubes connect only when needed. */
+  readonly connectWhen?: ConnectWhen;
   /**
    * Set when adding a route to a saved machine: the pairing must reach this
    * environment, or nothing is saved.
@@ -160,7 +163,10 @@ const registerPairingConnection = Effect.fn(
 )(function* (input: PairingConnectionInput) {
   const registration = yield* preparePairingRegistration(input);
   const registry = yield* EnvironmentRegistry.EnvironmentRegistry;
-  yield* registry.register(registration);
+  yield* registry.register(
+    registration,
+    input.connectWhen === undefined ? undefined : { connectWhen: input.connectWhen },
+  );
   return registration.target.environmentId;
 });
 

@@ -320,7 +320,9 @@ const PersistedDraftThreadState = Schema.Struct({
   environmentId: Schema.String,
   projectId: ProjectId,
   logicalProjectKey: Schema.optionalKey(Schema.String),
-  environmentSelection: Schema.optionalKey(Schema.Literals(["auto", "manual"])),
+  // "cube": the first send creates a cube on the draft's environment
+  // and moves the draft into it.
+  environmentSelection: Schema.optionalKey(Schema.Literals(["auto", "manual", "cube"])),
   loadBalancedEnvironmentId: Schema.optionalKey(Schema.NullOr(Schema.String)),
   createdAt: Schema.String,
   runtimeMode: RuntimeMode,
@@ -452,7 +454,7 @@ export interface DraftSessionState {
   environmentId: EnvironmentId;
   projectId: ProjectId;
   logicalProjectKey: string;
-  environmentSelection?: "auto" | "manual";
+  environmentSelection?: "auto" | "manual" | "cube";
   loadBalancedEnvironmentId?: EnvironmentId | null;
   createdAt: string;
   runtimeMode: RuntimeMode;
@@ -541,7 +543,7 @@ interface ComposerDraftStoreState {
       startFromOrigin?: boolean;
       runtimeMode?: RuntimeMode;
       interactionMode?: ProviderInteractionMode;
-      environmentSelection?: "auto" | "manual";
+      environmentSelection?: "auto" | "manual" | "cube";
       loadBalancedEnvironmentId?: EnvironmentId | null;
     },
   ) => void;
@@ -558,7 +560,7 @@ interface ComposerDraftStoreState {
       startFromOrigin?: boolean;
       runtimeMode?: RuntimeMode;
       interactionMode?: ProviderInteractionMode;
-      environmentSelection?: "auto" | "manual";
+      environmentSelection?: "auto" | "manual" | "cube";
       loadBalancedEnvironmentId?: EnvironmentId | null;
     },
   ) => void;
@@ -574,7 +576,7 @@ interface ComposerDraftStoreState {
       startFromOrigin?: boolean;
       runtimeMode?: RuntimeMode;
       interactionMode?: ProviderInteractionMode;
-      environmentSelection?: "auto" | "manual";
+      environmentSelection?: "auto" | "manual" | "cube";
       loadBalancedEnvironmentId?: EnvironmentId | null;
     },
   ) => void;
@@ -1584,7 +1586,7 @@ function createDraftThreadState(
     startFromOrigin?: boolean;
     runtimeMode?: RuntimeMode;
     interactionMode?: ProviderInteractionMode;
-    environmentSelection?: "auto" | "manual";
+    environmentSelection?: "auto" | "manual" | "cube";
     loadBalancedEnvironmentId?: EnvironmentId | null;
   },
 ): DraftThreadState {
@@ -1821,7 +1823,8 @@ function normalizePersistedDraftThreads(
         envMode: normalizeDraftThreadEnvMode(candidateDraftThread.envMode, normalizedWorktreePath),
         startFromOrigin,
         ...(candidateDraftThread.environmentSelection === "manual" ||
-        candidateDraftThread.environmentSelection === "auto"
+        candidateDraftThread.environmentSelection === "auto" ||
+        candidateDraftThread.environmentSelection === "cube"
           ? { environmentSelection: candidateDraftThread.environmentSelection }
           : {}),
         ...(typeof candidateDraftThread.loadBalancedEnvironmentId === "string" &&

@@ -161,6 +161,18 @@ export function createEnvironmentCatalogAtoms<R, E>(
         Effect.flatMap((registry) => registry.setEnabled(input.environmentId, input.enabled)),
       ),
   });
+  /**
+   * Connects an environment because something needs it now, waking one that
+   * connects only when needed (a sleeping cube). Not serialised with the
+   * other catalog commands, since waking can take a few seconds.
+   */
+  const connect = createRuntimeCommand(runtime, {
+    label: "environment-catalog:connect",
+    execute: (environmentId: EnvironmentIdType) =>
+      EnvironmentRegistry.EnvironmentRegistry.pipe(
+        Effect.flatMap((registry) => registry.ensureConnected(environmentId, "60 seconds")),
+      ),
+  });
   const removeRoute = createRuntimeCommand(runtime, {
     label: "environment-catalog:remove-route",
     scheduler: commandScheduler,
@@ -206,6 +218,7 @@ export function createEnvironmentCatalogAtoms<R, E>(
     reorderRoutes,
     removeRelayEnvironments,
     retryNow,
+    connect,
     setEnabled,
   };
 }

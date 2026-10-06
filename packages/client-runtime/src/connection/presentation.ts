@@ -17,6 +17,11 @@ export interface EnvironmentConnectionPresentation {
   readonly phase: EnvironmentConnectionPhase;
   readonly error: string | null;
   readonly traceId: string | null;
+  /**
+   * The environment connects only when needed (a cube), so "available"
+   * means idle, possibly asleep, and using it connects.
+   */
+  readonly connectsWhenNeeded?: true;
 }
 
 export interface EnvironmentPresentation {
@@ -59,7 +64,7 @@ export function presentConnectionState(
 export function connectionStatusText(connection: EnvironmentConnectionPresentation): string {
   switch (connection.phase) {
     case "available":
-      return "Available";
+      return connection.connectsWhenNeeded ? "Connects when needed" : "Available";
     case "offline":
       return "Offline";
     case "connecting":
@@ -88,8 +93,12 @@ export function connectionStatusTitle(connection: EnvironmentConnectionPresentat
 
 export function presentEnvironmentConnection(
   state: SupervisorConnectionState,
+  entry?: Pick<ConnectionCatalogEntry, "connectWhen">,
 ): EnvironmentConnectionPresentation {
-  return presentConnectionState(state);
+  const presentation = presentConnectionState(state);
+  return entry?.connectWhen === "needed"
+    ? { ...presentation, connectsWhenNeeded: true }
+    : presentation;
 }
 
 export function connectionCatalogDisplayUrl(entry: ConnectionCatalogEntry): string | null {

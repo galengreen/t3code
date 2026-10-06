@@ -41,6 +41,12 @@ const CONNECTION_PROBE_TIMEOUT = "15 seconds";
 // the user is waiting, or the network may be gone.
 const QUICK_CONNECTION_PROBE_TIMEOUT = "3 seconds";
 const BACKOFF_RESET_AFTER_MS = 30_000;
+// An on-demand connection that was asked for keeps trying this long: enough
+// for a sleeping machine to wake (about a second) or boot (a few seconds).
+const ON_DEMAND_CONNECT_WINDOW_MS = 60_000;
+// A dropped on-demand connection keeps trying this long while its environment
+// was last seen working, so a network blip does not hide an agent's progress.
+const ON_DEMAND_RECOVERY_WINDOW_MS = 120_000;
 // While connected over a fallback route, how often to look for a better one.
 // Network changes and returning to the app also trigger a check.
 const BETTER_ROUTE_CHECK_INTERVAL = "60 seconds";
@@ -113,6 +119,18 @@ function exitUnlessInterrupted<A, E, R>(
 
 export interface EnvironmentSupervisorOptions {
   readonly initiallyDesired?: boolean;
+  /**
+   * For environments that sleep when unused, such as cubes, where every
+   * connection attempt wakes the machine. `connect` then means "needed now":
+   * it keeps trying for a while and then goes quiet, instead of retrying
+   * forever, and a dropped connection is left closed. The exception is an
+   * environment last seen working: a drop retries for a while, and returning
+   * to the app reconnects, so the agent's results arrive.
+   */
+  readonly onDemand?: {
+    /** Whether the environment was last seen with an agent working. */
+    readonly hasActiveWork: Effect.Effect<boolean>;
+  };
   /**
    * Saves the direct addresses the server reports once a session is ready and
    * returns the entry with its updated routes, which later attempts use. The
@@ -272,6 +290,18 @@ export const make = Effect.fn("EnvironmentSupervisor.make")(function* (
     network: yield* connectivity.status,
   };
   const intent = yield* Ref.make(initialIntent);
+  const onDemand = options?.onDemand !== undefined;
+  const hasActiveWork = options?.onDemand?.hasActiveWork ?? Effect.succeed(false);
+  // On demand only: when retrying stops.
+  const retryUntil = yield* Ref.make(0);
+  // Wants a connection now; on demand, trying for a while from this moment.
+  const requestConnection = (
+    onDemand
+      ? Clock.currentTimeMillis.pipe(
+          Effect.flatMap((now) => Ref.set(retryUntil, now + ON_DEMAND_CONNECT_WINDOW_MS)),
+        )
+      : Effect.void
+  ).pipe(Effect.andThen(Ref.update(intent, (current) => ({ ...current, desired: true }))));
   const signals = yield* Queue.unbounded<SupervisorSignal>();
   const resetRetryState = yield* Ref.make(false);
   // Set while a probe of the live session is running, and kept when it fails
@@ -885,7 +915,11 @@ export const make = Effect.fn("EnvironmentSupervisor.make")(function* (
         latestFailure = null;
         yield* clearLease;
         yield* setState(availableState(currentIntent, generation));
-        yield* waitForSignal;
+        const applicationActivated = yield* waitForSignal;
+        // Returning to the app checks on an environment last seen working.
+        if (onDemand && applicationActivated && (yield* hasActiveWork)) {
+          yield* requestConnection;
+        }
         continue;
       }
       if (currentIntent.network === "offline" && !replacing) {
@@ -942,6 +976,20 @@ export const make = Effect.fn("EnvironmentSupervisor.make")(function* (
           resetRetryLadder();
         }
         continue;
+      }
+
+      if (onDemand) {
+        const now = yield* Clock.currentTimeMillis;
+        if (outcome.established && (yield* hasActiveWork)) {
+          // The deadline is set by the drop, not renewed by each reconnect, so a
+          // stale "working" hint cannot keep waking a machine that is asleep.
+          yield* Ref.set(retryUntil, now + ON_DEMAND_RECOVERY_WINDOW_MS);
+        }
+        if (now >= (yield* Ref.get(retryUntil))) {
+          // Each attempt would wake a sleeping machine, so wait to be needed.
+          yield* Ref.update(intent, (current) => ({ ...current, desired: false }));
+          continue;
+        }
       }
 
       if (failedProbe) {
@@ -1004,10 +1052,7 @@ export const make = Effect.fn("EnvironmentSupervisor.make")(function* (
   );
   yield* run().pipe(Effect.forkScoped);
 
-  const connect = Ref.update(intent, (current) => ({
-    ...current,
-    desired: true,
-  })).pipe(
+  const connect = requestConnection.pipe(
     Effect.andThen(signal({ _tag: "ConnectRequested" })),
     Effect.withSpan("EnvironmentSupervisor.connect"),
   );

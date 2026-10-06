@@ -115,6 +115,23 @@ export const makeEnvironmentShellState = Effect.fn("EnvironmentShellState.make")
 
   yield* runCachePersistence(persistence, persist).pipe(Effect.forkScoped);
 
+  // Tells the registry whether an agent is working here, cached or live, so an
+  // environment that connects only when needed follows that work.
+  const registry = yield* Effect.serviceOption(EnvironmentRegistry.EnvironmentRegistry);
+  if (Option.isSome(registry)) {
+    yield* SubscriptionRef.changes(state).pipe(
+      Stream.map(({ snapshot }) =>
+        Option.match(snapshot, {
+          onNone: () => false,
+          onSome: (current) => current.threads.some((thread) => thread.activeRunId !== null),
+        }),
+      ),
+      Stream.changes,
+      Stream.runForEach((active) => registry.value.setActiveWork(environmentId, active)),
+      Effect.forkScoped,
+    );
+  }
+
   const setDisconnected = Ref.set(awaitingCompletion, false).pipe(
     Effect.andThen(
       SubscriptionRef.update(state, (current) => ({

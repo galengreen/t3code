@@ -3,6 +3,7 @@ import {
   registerConnectionInCatalog,
   removeConnectionFromCatalog,
   setConnectionEnabledInCatalog,
+  setConnectWhenInCatalog,
   setRoutesInCatalog,
   removeCatalogValue,
   replaceCatalogValue,
@@ -27,10 +28,12 @@ function targetPersistenceError(
   operation:
     | "list-targets"
     | "list-disabled-targets"
+    | "list-on-demand-targets"
     | "register-connection"
     | "set-connection-routes"
     | "remove-connection"
-    | "set-connection-enabled",
+    | "set-connection-enabled"
+    | "set-connection-policy",
   error: ConnectionTransientError,
 ) {
   return new Persistence.ConnectionPersistenceError({
@@ -57,6 +60,10 @@ export const connectionStorageLayer = Layer.effectContext(
         Effect.map((document) => document.disabledEnvironmentIds),
         Effect.mapError((error) => targetPersistenceError("list-disabled-targets", error)),
       ),
+      listOnDemand: catalog.read.pipe(
+        Effect.map((document) => document.onDemandEnvironmentIds ?? []),
+        Effect.mapError((error) => targetPersistenceError("list-on-demand-targets", error)),
+      ),
     });
     const registrationStore = Persistence.ConnectionRegistrationStore.of({
       register: (registration, routes) =>
@@ -77,6 +84,10 @@ export const connectionStorageLayer = Layer.effectContext(
           .pipe(
             Effect.mapError((error) => targetPersistenceError("set-connection-enabled", error)),
           ),
+      setConnectWhen: (environmentId, connectWhen) =>
+        catalog
+          .update((document) => setConnectWhenInCatalog(document, environmentId, connectWhen))
+          .pipe(Effect.mapError((error) => targetPersistenceError("set-connection-policy", error))),
     });
     const profileStore = ProfileStore.make({
       get: (connectionId) =>

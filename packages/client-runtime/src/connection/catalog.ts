@@ -47,6 +47,13 @@ export class SshConnectionProfile extends Schema.TaggedClass<SshConnectionProfil
 export const ConnectionProfile = Schema.Union([BearerConnectionProfile, SshConnectionProfile]);
 export type ConnectionProfile = typeof ConnectionProfile.Type;
 
+/**
+ * When a saved environment connects. "always" keeps it connected and retries
+ * forever. "needed" is for environments that sleep when unused (cubes):
+ * they connect when something needs them, since each attempt wakes the machine.
+ */
+export type ConnectWhen = "always" | "needed";
+
 /** One way to reach an environment: T3 Connect, a direct URL, or SSH. */
 export interface ConnectionRoute {
   readonly target: ConnectionTarget;
@@ -64,6 +71,8 @@ export interface ConnectionCatalogEntry {
   readonly alternateRoutes?: ReadonlyArray<ConnectionRoute>;
   /** False when the user switched the environment off: saved, but never connects. */
   readonly enabled: boolean;
+  /** Absent means "always". */
+  readonly connectWhen?: ConnectWhen;
   /** Discovery rejection stays visible while the saved connection is switched off. */
   readonly unsupportedReason?: string;
   /** The rejection came from an outdated host, which can still be updated remotely. */

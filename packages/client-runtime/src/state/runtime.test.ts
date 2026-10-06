@@ -100,6 +100,9 @@ const makeEnvironmentQueryHarness = Effect.fn("TestEnvironmentQuery.makeHarness"
     stream,
   ) => Stream.provideService(stream, EnvironmentSupervisor.EnvironmentSupervisor, supervisor);
   const environmentRegistry = EnvironmentRegistry.EnvironmentRegistry.of({
+    entries: (yield* SubscriptionRef.make(
+      new Map(),
+    )) as unknown as EnvironmentRegistry.EnvironmentRegistry["Service"]["entries"],
     run,
     followStream,
     stateChanges: () => SubscriptionRef.changes(supervisorState),
